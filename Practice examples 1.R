@@ -4,17 +4,24 @@ library(gurobi)
 
 N <- 9 # Total number of nodes
 d_vars <- expand.grid(1:N, 1:N)[-(1+(N+1)*(0:(N-1))),] %>% mutate(name=paste0("w_", Var2, Var1)) %>% pull(name)
-d_vars <- c(d_vars, paste0("S", 1:9), "PO", "PS")
+d_vars <- c(d_vars, paste0("S", 1:3))
 n_borders <- 3 # < 8, Node 5 and 8 can't be a border point (in-land)
 PO <- 0.1 # overdose proportional parameter
 PS <- 5 # seizure proportionality parameter
 
+
+
 set.seed(100)
 {
+seizure <- numeric(9)
+seizure[c(2, 5, 8)] <- runif(3, 1, 100) %>% sort(decreasing=T)
+seizure[1] <- seizure[2]* runif(1, 0.9, 1.1)
+seizure[3] <- seizure[2]* runif(1, 0.9, 1.1)
+seizure[4] <- seizure[5]* runif(1, 0.9, 1.1)
+seizure[6] <- seizure[5]* runif(1, 0.9, 1.1)
+seizure[7] <- seizure[8]* runif(1, 0.9, 1.1)
+seizure[9] <- seizure[8]* runif(1, 0.9, 1.1)
 O <- c(runif(9, 100, 1000)) %>% round(0)
-seizure <- runif(9, 1, 50)
-if (sum(seizure) > sum(S)) seizure <- sum(S)*seizure/sum(seizure)
-sum(seizure)
 
 price <- rep(0 , 9)
 price[2] <- runif(1, 1, 100)
@@ -45,36 +52,36 @@ matrix(purity, 3, 3, byrow = T)
 
 # Constraints
   # Conservation of flow/consumption
-A1 <- matrix(0, N, N*(N-1)+N+2)
+A1 <- matrix(0, N, N*(N-1)+n_borders)
 for (i in 1:N) {
   A_ref <- matrix(0, N, N)
   A_ref[i,] <- -1
   A_ref[, i] <- 1
-  off_diag_index <- data.frame(row=-(1:N), col=-(1:N))
-  S_vec <- rep(0, N)
-  S_vec[i] <- 1
-  A1[i,] <- c(as.vector(t(A_ref))[-(1+(N+1)*(0:(N-1)))], S_vec, -O[i], 0)
+  S_vec <- rep(0, n_borders)
+  if (i < 4) S_vec[i] <- 1
+  A1[i,] <- c(as.vector(t(A_ref))[-(1+(N+1)*(0:(N-1)))], S_vec)
 }
 b1 <- rep(0, N)
+b1_alt <- PO*O
 
   # State seizure
-A2 <- matrix(0, N, N*(N-1)+N+2)
+A2 <- matrix(0, N, N*(N-1)+n_borders)
 for (i in 1:N) {
   A_ref <- matrix(0, N, N)
   A_ref[, i] <- 1
-  S_vec <- rep(0, N)
-  S_vec[i] <- 1
-  A2[i,] <- c(as.vector(t(A_ref))[-(1+(N+1)*(0:(N-1)))], S_vec, 0, -seizure[i])
+  S_vec <- rep(0, n_borders)
+  if (i < 4) S_vec[i] <- 1
+  A2[i,] <- c(as.vector(t(A_ref))[-(1+(N+1)*(0:(N-1)))], S_vec)
 }
 b2 <- rep(0, N)
-b2_alt <- seizure - S
+b2_alt <- seizure
 
   # Directionality of flow
 less_than_price <- expand.grid(price, price)[-(1+(N+1)*(0:(N-1))),] %>% mutate(less_than=Var2 < Var1) %>% pull(less_than) %>% which
 less_than_purity <- expand.grid(purity, purity)[-(1+(N+1)*(0:(N-1))),] %>% mutate(less_than=Var2 < Var1) %>% pull(less_than) %>% which
 zero_d_vars_index <- unique(c(less_than_price, less_than_purity)) %>% sort
 n_zero_d_vars <- length(zero_d_vars_index)
-A_zero_d_vars <- matrix(0, n_zero_d_vars, N*(N-1)+N+2)
+A_zero_d_vars <- matrix(0, n_zero_d_vars, N*(N-1)+n_borders)
 for (i in 1:n_zero_d_vars) {
   A_zero_d_vars[i, zero_d_vars_index[i]] <- 1
 }
@@ -83,14 +90,12 @@ b_zero_d_vars <- rep(0, n_zero_d_vars)
 
 {
 model <- list()
-model$obj        <- rep(0, N*(N-1)+N+2)
+model$obj        <- rep(0, N*(N-1)+n_borders)
 model$A          <- rbind(A1, A2, A_zero_d_vars)
-model$rhs        <- c(b1, b2, b_zero_d_vars)
-
-model$A          <- rbind(A1, A2)
-model$rhs        <- c(b1, b2)
+model$rhs        <- c(b1_alt, b2_alt, b_zero_d_vars)
 
 model$sense      <- rep("=", nrow(model$A))
+model$sense[10:18] <- ">"
 model$vtype      <- "C" # Continuous
 
 result <- gurobi(model, list(Method=2))
@@ -99,17 +104,18 @@ summary(result)
 
 {
 model_alt <- list()
-model_alt$obj          <- rep(0, N*(N-1))
-model_alt$A            <- rbind(A1, A2, A_zero_d_vars)
-model_alt$rhs          <- c(b1, b2_alt, b_zero_d_vars)  # seizure constrains are now >= without PS
-model_alt$sense        <- rep("=", nrow(model_alt$A))
+model_alt$obj        <- rep(0, N*(N-1)+n_borders)
+model_alt$A          <- rbind(A1, A2)
+model_alt$rhs        <- c(b1_alt, b2_alt)
+
+model_alt$sense      <- rep("=", nrow(model_alt$A))
 model_alt$sense[10:18] <- ">"
-model_alt$vtype        <- "C" # Continuous
+model_alt$vtype      <- "C" # Continuous
 
-result_alt  <- gurobi(model_alt)
-summary(result_alt)
+result <- gurobi(model_alt, list(Method=2))
+result
 }
-
+data.frame(deicision_vars=d_vars, optimal_sols=result$x)
 
 d_vars_relaxed <- c(d_vars, "epsilon_o", "epsilon_p")
 A_epsilon <-  matrix(0, nrow(model$A), 2)
