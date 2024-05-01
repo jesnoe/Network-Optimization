@@ -20,6 +20,12 @@ library(lubridate)
   stride %>% pull(Drug) %>% unique %>% sort
   stride %>% filter(grepl("COCAINE", Drug)) %>% pull(Drug) %>% unique
   
+  neighbor_xlsx <- read_xlsx("Cocaine Network Optimization/states neighborhood.xlsx")
+  neighbor <- list()
+  for (i in 1:length(neighbor_xlsx$State)) {
+    neighbor[[neighbor_xlsx$State[i]]] <- strsplit(neighbor_xlsx$Bordering_States[i], ", ")[[1]]
+  }
+
   # Cocaine Data
   cocaine <- stride %>%
     filter(Drug %in% c("COCAINE", "COCAINE HYDROCHLORIDE") & Seize.Year != "NULL" & Seize.Month != "NULL" & State != "NULL") %>% 
@@ -91,115 +97,140 @@ cocaine_annual_prices %>% filter(Seize.Year == ex_year) %>% arrange(state) %>% a
 # 4: Nevada      5: Missouri  6: West Virginia
 # 7: Washington  8: Illinois  9: New York
 
-nine_states <- c("California", "Texas", "Florida", "Nevada", "Colorado", "Missouri", "Washington", "Illinois", "New York")
 }
 
 # Optimization
 {
 ex_year <- 2012
-nine_states_data <- cocaine_annual_prices %>%
-  filter(Seize.Year == ex_year & state %in% nine_states) %>% 
-  left_join(cocaine_annual_seizures %>% filter(Seize.Year == ex_year & state %in% nine_states) %>% select(-Seize.Year), by="state") %>% 
-  left_join(cocaine_annual_purities %>% filter(Seize.Year == ex_year & state %in% nine_states) %>% select(-Seize.Year), by="state") %>% 
-  left_join(overdose %>% filter(year == ex_year & state %in% nine_states) %>% select(-year), by="state")
-nine_states_data <- nine_states_data[c(1,7,2, 5,4,9, 8,3,6),]
-matrix(nine_states_data$med_price, 3, 3, byrow=T)
-matrix(nine_states_data$med_purity, 3, 3, byrow=T)
-matrix(nine_states_data$avg_price, 3, 3, byrow=T)
-matrix(nine_states_data$avg_purity, 3, 3, byrow=T)
-# how to set source states? using price or purity?
+state_names <- names(neighbor)
+states_data <- cocaine_annual_prices %>%
+  filter(Seize.Year == ex_year & state %in% state_names) %>% 
+  arrange(state) %>% 
+  left_join(cocaine_annual_seizures %>% filter(Seize.Year == ex_year & state %in% state_names) %>% select(-Seize.Year), by="state") %>% 
+  left_join(cocaine_annual_purities %>% filter(Seize.Year == ex_year & state %in% state_names) %>% select(-Seize.Year), by="state") %>% 
+  left_join(overdose %>% filter(year == ex_year & state %in% state_names) %>% select(-year), by="state") %>% 
+  filter(!is.na(sum(n_price, n_weight, deaths)))
 
 # all possible sources
-N <- nrow(nine_states_data) # Total number of nodes
-source_index <- 1:9
-n_sources <- length(source_index) # < 8, Node 5 and 8 can't be a border point (in-land)
-d_vars <- expand.grid(1:N, 1:N)[-(1+(N+1)*(0:(N-1))),] %>% mutate(name=paste0("w_", Var2, Var1)) %>% pull(name)
+N <- nrow(states_data) # Total number of nodes
+state_index <- tibble(state=states_data$state, state_index=1:N) %>% 
+  arrange(state) %>% 
+  left_join(states %>% 
+              rename(state=state_name) %>% 
+              group_by(state) %>% 
+              summarise(x=mean(long), y=mean(lat)), by="state")
+
+d_vars <- c()
+for (i in 1:N) {
+  bordering_states_index <- state_index %>%
+    filter(state %in% neighbor[[states_data$state[i]]]) %>% pull(source_index)
+  d_vars <- c(d_vars, paste0("w", i, ",", bordering_states_index, "."))
+}
+
 d_vars <- c(d_vars, paste0("S", source_index))
 d_vars <- c(d_vars, paste0("x", source_index))
 n_d_vars <- length(d_vars)
-# PO <- 0.1 # overdose proportional parameter
+PO <- 100 # overdose proportional parameter
 # PS <- 5 # seizure proportionality parameter
 }
 
 {
-  # seizure <- nine_states_data$total_weight
-  seizure <- nine_states_data$max_weight
-  O <- nine_states_data$deaths
-  price <- nine_states_data$med_price
-  purity <- nine_states_data$med_purity
+  # seizure <- states_data$total_weight
+  seizure <- states_data$max_weight
+  log_seizure <- log(seizure)
+  O <- states_data$deaths
+  price <- states_data$med_price
+  purity <- states_data$med_purity
   
   # Constraints
   # Conservation of flow/consumption
   A1 <- matrix(0, N, n_d_vars)
   for (i in 1:N) {
-    A_ref <- matrix(0, N, N)
-    A_ref[i,] <- -1
-    A_ref[, i] <- 1
-    S_vec <- rep(-O[i]/sum(O), n_sources)
-    if (i %in% source_index) S_vec[which(source_index == i)] <- 1 + S_vec[which(source_index == i)]
-    
-    A1[i,] <- c(as.vector(t(A_ref))[-(1+(N+1)*(0:(N-1)))], S_vec, rep(0, n_sources))
+    A1[i,grep(paste0("w", i, ","), d_vars)] <- -1
+    A1[i,grep(paste0(",\\b[", i, "]\\b."), d_vars)] <- 1
+    A1[i,(n_d_vars-2*N+1):(n_d_vars-N)] <- rep(1, N)
   }
-  b1 <- rep(0, N)
-  
-  A1_alt <- matrix(0, N, n_d_vars)
-  for (i in 1:N) {
-    A_ref <- matrix(0, N, N)
-    A_ref[i,] <- -1
-    A_ref[, i] <- 1
-    S_vec <- rep(0, n_sources)
-    if (i %in% source_index) S_vec[which(source_index == i)] <- 1
-    
-    A1_alt[i,] <- c(as.vector(t(A_ref))[-(1+(N+1)*(0:(N-1)))], S_vec, rep(0, n_sources))
-  }
-  b1_alt <- O
+  b1 <- PO*O/sum(O)
+  b1_alt <- PO*O/sum(O)
   
   # State seizure
   A2 <- matrix(0, N, n_d_vars)
   for (i in 1:N) {
-    A_ref <- matrix(0, N, N)
-    A_ref[, i] <- 1
-    S_vec <- rep(0, n_sources)
-    if (i %in% source_index) S_vec[which(source_index == i)] <- 1
-    A2[i,] <- c(as.vector(t(A_ref))[-(1+(N+1)*(0:(N-1)))], S_vec, rep(0, n_sources))
+    A2[i,grep(paste0(",\\b[", i, "]\\b."), d_vars)] <- 1
+    A2[i,(n_d_vars-2*N+1):(n_d_vars-N)] <- rep(1, N)
   }
-  b2 <- PS*seizure
-  b2_alt <- seizure
+  b2_ratio <- 100*seizure/sum(seizure)
+  b2_log_ratio <- 100*log_seizure/sum(log_seizure)
   
   # Directionality of flow
-  less_than_price <- expand.grid(price, price)[-(1+(N+1)*(0:(N-1))),] %>% mutate(less_than=Var2 > Var1) %>% pull(less_than) %>% which
-  greater_than_purity <- expand.grid(purity, purity)[-(1+(N+1)*(0:(N-1))),] %>% mutate(greater_than=Var2 < Var1) %>% pull(greater_than) %>% which
+  less_than_price <- c()
+  greater_than_purity <- c()
+  for (i in 1:(n_d_vars - 2*N)) {
+    var <- d_vars[i]
+    comma_index <- which(strsplit(var, "")[[1]] == ",")
+    dot_index <- which(strsplit(var, "")[[1]] == ".") - 1
+    source_index <- substr(var, 2, comma_index - 1) %>% as.numeric
+    destination_index <- substr(var, comma_index + 1, dot_index) %>% as.numeric
+    if (price[destination_index] < price[source_index]) less_than_price <- c(less_than_price, i)
+    if (purity[destination_index] > price[source_index]) greater_than_purity <- c(greater_than_purity, i)
+  }
   zero_d_vars_index <- unique(c(less_than_price, greater_than_purity)) %>% sort
   n_zero_d_vars <- length(zero_d_vars_index)
-  A_zero_d_vars <- matrix(0, n_zero_d_vars, n_d_vars)
-  for (i in 1:n_zero_d_vars) {
-    A_zero_d_vars[i, zero_d_vars_index[i]] <- 1
-  }
-  b_zero_d_vars <- rep(0, n_zero_d_vars)
   
   # Source indicator
   A3 <- matrix(0, 2*N, n_d_vars)
-  for (i in 1:n_sources) {
-    A3[i, grep(i, substr(d_vars, 2, 2))] <- c(-1, 1000000000)
-    A3[i+n_sources, grep(i, substr(d_vars, 2, 2))] <- c(1, 0.1)
+  for (i in 1:N) {
+    A3[i, which(d_vars %in% c(paste0("S", i), paste0("x", i)))] <- c(1, -1)
+    A3[i+N, which(d_vars %in% c(paste0("S", i), paste0("x", i)))] <- c(-0.01, 1)
   }
-  b3 <- rep(0, 2*n_sources)
+  b3 <- rep(0, 2*N)
+  
+  A_source_limit <- matrix(0, 1, n_d_vars)
+  A_source_limit[1, grep("S", d_vars)] <- 1
+  b_source_limit <- 100
 }
 
 
 {# Ax >= seizure with directionality and obj. func.
-  model_obj_sum <- list()
-  model_obj_sum$obj        <- c(rep(0, n_d_vars - n_zero_d_vars - n_sources), rep(1, n_sources))
-  model_obj_sum$modelsense <- "min"
-  model_obj_sum$A          <- rbind(A1[,-zero_d_vars_index], A2[,-zero_d_vars_index], A3[,-zero_d_vars_index])
-  model_obj_sum$rhs        <- c(b1, b2_alt, b3)
-  model_obj_sum$sense      <- rep(">", nrow(model_obj_sum$A))
-  model_obj_sum$sense[1:N] <- "="
-  model_obj_sum$vtype      <- c(rep("C", length(model_obj_sum$obj) - n_sources), rep("B", n_sources)) # Continuous and binary
   
-  result_obj_sum <- gurobi(model_obj_sum, list(Method=2))
+  model_obj <- list()
+  model_obj$obj        <- c(rep(0, n_d_vars - n_zero_d_vars - N), rep(1, N))
+  model_obj$modelsense <- "min"
+  model_obj$A          <- rbind(A1[,-zero_d_vars_index], A2[,-zero_d_vars_index], A3[,-zero_d_vars_index], A_source_limit[,-zero_d_vars_index])
+  model_obj$sense      <- rep(">", nrow(model_obj$A))
+  model_obj$sense[1:N] <- "="
+  model_obj$sense[nrow(model_obj$A)] <- "="
+  model_obj$vtype      <- c(rep("C", length(model_obj$obj) - N), rep("B", N)) # Continuous and binary
+  model_obj$rhs        <- c(b1, b2_ratio, b3, b_source_limit)
+  result_obj_sum           <- gurobi(model_obj, list(Method=2))
   result_obj_sum
+  
+  # iterate multiple values for PS
+  PS_results <- data.frame()
+  for (PS in seq(1, 100, by=1)) {
+    b2 <- PS*seizure
+    b2_log <- PS*log_seizure
+    model_obj$rhs <- c(b1, b2, b3, b_source_limit)
+    result_obj_seizure <- gurobi(model_obj, list(Method=2))
+    model_obj$rhs <- c(b1, b2_log, b3, b_source_limit)
+    result_obj_log_seizure <- gurobi(model_obj, list(Method=2))
+    PS_results <- rbind(PS_results, c(PS, result_obj_seizure$status, result_obj_log_seizure$status))
+  }
+  names(PS_results) <- c("PS", "seizure_solution", "log_seizure_solution")
+  PS_results
 }
+
+model_obj$obj <- rep(0, n_d_vars - n_zero_d_vars)
+
+PS <- 5
+b2_log <- PS*log_seizure
+model_obj$rhs <- c(b1, b2_log, b3, b_source_limit)
+result_obj_log_seizure <- gurobi(model_obj, list(Method=2))
+result_obj_log_seizure$pool
+opt_sol <- data.frame(deicision_vars=d_vars[-zero_d_vars_index], optimal_sols=result_obj_log_seizure$pool[[2]]$xn) %>%
+  filter(optimal_sols > 0 & !grepl("x", deicision_vars))
+opt_sol
+
 
 coordinates <- data.frame(i=1:9, j=1:9, x=rep(1:3, 3), y=rep(1:3, each=3))
 opt_sol <- data.frame(deicision_vars=d_vars[-zero_d_vars_index], optimal_sols=result_obj_sum$pool[[1]]$xn) %>%
