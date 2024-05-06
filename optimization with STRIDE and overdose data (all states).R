@@ -118,20 +118,21 @@ state_index <- tibble(state=states_data$state, state_index=1:N) %>%
   left_join(states %>% 
               rename(state=state_name) %>% 
               group_by(state) %>% 
-              summarise(x=mean(long), y=mean(lat)), by="state")
+              summarise(long=mean(long), lat=mean(lat)), by="state")
 
 d_vars <- c()
 for (i in 1:N) {
   bordering_states_index <- state_index %>%
-    filter(state %in% neighbor[[states_data$state[i]]]) %>% pull(source_index)
+    filter(state %in% neighbor[[states_data$state[i]]]) %>% pull(state_index)
   d_vars <- c(d_vars, paste0("w", i, ",", bordering_states_index, "."))
 }
 
-d_vars <- c(d_vars, paste0("S", source_index))
-d_vars <- c(d_vars, paste0("x", source_index))
+d_vars <- c(d_vars, paste0("S", 1:N))
+d_vars <- c(d_vars, paste0("x", 1:N))
 n_d_vars <- length(d_vars)
 PO <- 100 # overdose proportional parameter
 # PS <- 5 # seizure proportionality parameter
+epsilon <- 0.9
 }
 
 {
@@ -141,14 +142,14 @@ PO <- 100 # overdose proportional parameter
   O <- states_data$deaths
   price <- states_data$med_price
   purity <- states_data$med_purity
-  
-  # Constraints
+
+    # Constraints
   # Conservation of flow/consumption
   A1 <- matrix(0, N, n_d_vars)
   for (i in 1:N) {
-    A1[i,grep(paste0("w", i, ","), d_vars)] <- -1
-    A1[i,grep(paste0(",\\b[", i, "]\\b."), d_vars)] <- 1
-    A1[i,(n_d_vars-2*N+1):(n_d_vars-N)] <- rep(1, N)
+    A1[i, which(str_match(d_vars, paste0("w", i, ","))[,1] == paste0("w", i, ","))] <- -1
+    A1[i, which(str_match(d_vars, paste0(",", i, "."))[,1] == paste0(",", i, "."))] <- 1
+    A1[i, n_d_vars-2*N+i] <- 1
   }
   b1 <- PO*O/sum(O)
   b1_alt <- PO*O/sum(O)
@@ -156,8 +157,8 @@ PO <- 100 # overdose proportional parameter
   # State seizure
   A2 <- matrix(0, N, n_d_vars)
   for (i in 1:N) {
-    A2[i,grep(paste0(",\\b[", i, "]\\b."), d_vars)] <- 1
-    A2[i,(n_d_vars-2*N+1):(n_d_vars-N)] <- rep(1, N)
+    A2[i, which(str_match(d_vars, paste0(",", i, "."))[,1] == paste0(",", i, "."))] <- 1
+    A2[i, n_d_vars-2*N+i] <- 1
   }
   b2_ratio <- 100*seizure/sum(seizure)
   b2_log_ratio <- 100*log_seizure/sum(log_seizure)
@@ -172,7 +173,7 @@ PO <- 100 # overdose proportional parameter
     source_index <- substr(var, 2, comma_index - 1) %>% as.numeric
     destination_index <- substr(var, comma_index + 1, dot_index) %>% as.numeric
     if (price[destination_index] < price[source_index]) less_than_price <- c(less_than_price, i)
-    if (purity[destination_index] > price[source_index]) greater_than_purity <- c(greater_than_purity, i)
+    if (purity[destination_index] > purity[source_index]) greater_than_purity <- c(greater_than_purity, i)
   }
   zero_d_vars_index <- unique(c(less_than_price, greater_than_purity)) %>% sort
   n_zero_d_vars <- length(zero_d_vars_index)
@@ -198,12 +199,44 @@ PO <- 100 # overdose proportional parameter
   model_obj$modelsense <- "min"
   model_obj$A          <- rbind(A1[,-zero_d_vars_index], A2[,-zero_d_vars_index], A3[,-zero_d_vars_index], A_source_limit[,-zero_d_vars_index])
   model_obj$sense      <- rep(">", nrow(model_obj$A))
-  model_obj$sense[1:N] <- "="
+  # model_obj$sense[1:N] <- "="
   model_obj$sense[nrow(model_obj$A)] <- "="
   model_obj$vtype      <- c(rep("C", length(model_obj$obj) - N), rep("B", N)) # Continuous and binary
   model_obj$rhs        <- c(b1, b2_ratio, b3, b_source_limit)
-  result_obj_sum           <- gurobi(model_obj, list(Method=2))
+  result_obj_sum       <- gurobi(model_obj, list(Method=2))
   result_obj_sum
+  
+  # iterate multiple epsilons for the directionality of flow
+  epsilton_results <- data.frame()
+  for (epsilon in seq(0.5, 1, by=0.05)) {
+    less_than_price <- c()
+    greater_than_purity <- c()
+    for (i in 1:(n_d_vars - 2*N)) {
+      var <- d_vars[i]
+      comma_index <- which(strsplit(var, "")[[1]] == ",")
+      dot_index <- which(strsplit(var, "")[[1]] == ".") - 1
+      source_index <- substr(var, 2, comma_index - 1) %>% as.numeric
+      destination_index <- substr(var, comma_index + 1, dot_index) %>% as.numeric
+      if (price[destination_index] < price[source_index]*epsilon) less_than_price <- c(less_than_price, i)
+      if (purity[destination_index]*epsilon > purity[source_index]) greater_than_purity <- c(greater_than_purity, i)
+    }
+    zero_d_vars_index <- unique(c(less_than_price, greater_than_purity)) %>% sort
+    n_zero_d_vars <- length(zero_d_vars_index)
+    
+    model_epsilon <- list()
+    model_epsilon$obj        <- c(rep(0, n_d_vars - n_zero_d_vars - N), rep(1, N))
+    model_epsilon$modelsense <- "min"
+    model_epsilon$A          <- rbind(A1[,-zero_d_vars_index], A2[,-zero_d_vars_index], A3[,-zero_d_vars_index], A_source_limit[,-zero_d_vars_index])
+    model_epsilon$sense      <- rep(">", nrow(model_epsilon$A))
+    # model_epsilon$sense[1:N] <- "="
+    model_epsilon$sense[nrow(model_epsilon$A)] <- "="
+    model_epsilon$vtype      <- c(rep("C", length(model_epsilon$obj) - N), rep("B", N)) # Continuous and binary
+    model_epsilon$rhs        <- c(b1, b2_ratio, b3, b_source_limit)
+    result_epsilon_sum       <- gurobi(model_epsilon, list(Method=2))
+    epsilton_results <- rbind(epsilton_results, c(epsilon, result_epsilon_sum$status))
+  }
+  names(epsilton_results) <- c("epsilon", "feasibility")
+  epsilton_results
   
   # iterate multiple values for PS
   PS_results <- data.frame()
@@ -220,9 +253,134 @@ PO <- 100 # overdose proportional parameter
   PS_results
 }
 
+
+## results with b2_ratio = 100*seizure/sum(seizure)
+find_state_index <- function(d_var) {
+  if (grepl("w", d_var)) {
+    comma_index <- which(str_split(d_var, "")[[1]] == ",")
+    dot_index <- which(str_split(d_var, "")[[1]] == ".")
+    return(c(substr(d_var, 2, comma_index-1), substr(d_var, comma_index+1, dot_index-1)) %>% as.numeric)
+  }
+  
+  if (grepl("S", d_var)) {
+    return(rep(substr(d_var, 2, str_length(d_var)), 2) %>% as.numeric)
+  }
+}
+find_state_index <- Vectorize(find_state_index)
+
+result_obj_sum$pool %>% length
+for (sol_i in 1:(result_obj_sum$pool %>% length)) {
+  opt_sol <- data.frame(deicision_vars=d_vars[-zero_d_vars_index], optimal_sols=result_obj_sum$pool[[sol_i]]$xn) %>%
+    filter(optimal_sols > 0 & !grepl("x", deicision_vars))
+  opt_sol
+  # write.csv(opt_sol,
+  #           paste0("Cocaine Network Optimization/Results/optimal networks (epsilon=0.5, sum_x=", result_obj_sum$pool[[sol_i]]$objval, ").csv"),
+  #           row.names=F)
+  total_flow <- opt_sol %>%
+    filter(grepl("S", deicision_vars)) %>%
+    pull(optimal_sols) %>% sum
+  total_flow
+  
+  opt_sol <- cbind(opt_sol, find_state_index(opt_sol$deicision_vars) %>% t) %>% 
+    rename(i="1", j="2")
+  
+  opt_sol$long_i <- state_index$long[opt_sol$i]
+  opt_sol$lat_i <- state_index$lat[opt_sol$i]
+  opt_sol$long_j <- state_index$long[opt_sol$j]
+  opt_sol$lat_j <- state_index$lat[opt_sol$j]
+  
+  result_flow_index <- grep("w", opt_sol$deicision_vars)
+  result_source_index <- grep("S", opt_sol$deicision_vars)
+  overdose_map_year <- left_join(states %>%
+                                   rename(state=state_name) %>% 
+                                   filter(!(state %in% c("Alaska", "Hawaii"))),
+                                 states_data %>% select(state, deaths),
+                                 by="state")
+  overdose_map_year %>% ggplot() +
+    geom_polygon(aes(x=long,
+                     y=lat,
+                     group=group,
+                     fill=deaths),
+                 color="black") +
+    scale_fill_viridis_c(na.value="white") +
+    expand_limits(x=overdose_map_year$long, y=overdose_map_year$lat) +
+    coord_quickmap() +
+    labs(x="", y="") +
+    theme_bw() + 
+    theme(axis.ticks = element_blank(),
+          axis.line =  element_blank(),
+          axis.text = element_blank(),
+          panel.border = element_blank(),
+          panel.grid.major = element_blank(),
+          panel.grid.minor = element_blank()) +
+    geom_point(data=state_index,
+               aes(x=long, y=lat)) +
+    geom_segment(data=opt_sol[result_flow_index,],
+                 aes(x=long_i, 
+                     y=lat_i, 
+                     xend=long_j,
+                     yend=lat_j),
+                 linewidth = 5*opt_sol$optimal_sols[result_flow_index]/total_flow,
+                 arrow=arrow(angle=10,
+                             length=unit(0.3, "cm"),
+                             type="closed")
+    ) +
+    geom_text(data=opt_sol[result_source_index,],
+              aes(x=long_i, y=lat_i),
+              label=opt_sol[result_source_index,]$optimal_sols %>% round(1),
+              color="red",
+              nudge_x = c(0.1, 0), nudge_y = c(-0.5, 0)) -> optimal_network_map
+  # ggsave(paste0("Cocaine Network Optimization/Results/optimal networks (epsilon=0.5, sum_x=", result_obj_sum$pool[[sol_i]]$objval, ").png"),
+  #        optimal_network_map, scale=1.5)
+}
+  
+A1[, -zero_d_vars_index] %*% matrix(result_obj_sum$pool[[sol_i]]$xn, ncol=1)
+
+cocaine %>%
+  filter(Seize.Year == 2012 & !is.na(adjusted_price) & Nt.Wt >= 5 & Nt.Wt <= 1000) %>%
+  select(-MethAcq, -Drug) %>% 
+  relocate(state, Seize.Year, Seize.Month) %>% 
+  print(n=20)
+
+cocaine %>%
+  filter(Seize.Year == 2012 & !is.na(adjusted_price) & Nt.Wt >= 5 & Nt.Wt <= 1000) %>%
+  select(-MethAcq, -Drug) %>% 
+  relocate(state, Seize.Year, Seize.Month) %>% 
+  group_by(state) %>% 
+  summarise(price_sd_max_wt1000=sd(adjusted_price)) %>% 
+  print(n=43)
+
+cocaine %>%
+  filter(Seize.Year == 2012 & !is.na(adjusted_price) & Nt.Wt >= 5 & Nt.Wt <= 100) %>%
+  select(-MethAcq, -Drug) %>% 
+  relocate(state, Seize.Year, Seize.Month) %>% 
+  group_by(state) %>% 
+  summarise(price_sd_max_wt100=sd(adjusted_price)) %>% 
+  print(n=43)
+
+  # same results allowing S > 0 only for CA, FL, TX 
+n_states <- nrow(state_index)
+three_sources <- state_index %>% filter(state %in% c("California", "Florida", "Texas")) %>% pull(state_index)
+sum(grepl("w", d_vars))
+omitted_index <- c(zero_d_vars_index, (165:n_d_vars)[!((165:n_d_vars) %in% which(d_vars %in% paste0("S", three_sources)))])
+
+model_obj <- list()
+model_obj$obj        <- c(rep(0, n_d_vars - length(omitted_index)))
+model_obj$modelsense <- "min"
+model_obj$A          <- rbind(A1[,-omitted_index], A2[,-omitted_index], A3[,-omitted_index], A_source_limit[,-omitted_index])
+model_obj$sense      <- rep(">", nrow(model_obj$A))
+# model_obj$sense[1:N] <- "="
+model_obj$sense[nrow(model_obj$A)] <- "="
+model_obj$vtype      <- "C"
+model_obj$rhs        <- c(b1, b2_ratio, b3, b_source_limit)
+result_obj_sum       <- gurobi(model_obj, list(Method=2))
+result_obj_sum
+
+
+## results for log seizures
 model_obj$obj <- rep(0, n_d_vars - n_zero_d_vars)
 
-PS <- 5
+PS <- 1
 b2_log <- PS*log_seizure
 model_obj$rhs <- c(b1, b2_log, b3, b_source_limit)
 result_obj_log_seizure <- gurobi(model_obj, list(Method=2))
@@ -231,45 +389,4 @@ opt_sol <- data.frame(deicision_vars=d_vars[-zero_d_vars_index], optimal_sols=re
   filter(optimal_sols > 0 & !grepl("x", deicision_vars))
 opt_sol
 
-
-coordinates <- data.frame(i=1:9, j=1:9, x=rep(1:3, 3), y=rep(1:3, each=3))
-opt_sol <- data.frame(deicision_vars=d_vars[-zero_d_vars_index], optimal_sols=result_obj_sum$pool[[1]]$xn) %>%
-  filter(optimal_sols > 0 & !grepl("x", deicision_vars))
-total_flow <- sum(opt_sol$optimal_sols)
-
-
-flow_index <- grep("w", opt_sol$deicision_vars)
-source_index <- grep("S", opt_sol$deicision_vars)
-
-opt_sol$i <- c(opt_sol$deicision_vars[flow_index] %>% substr(3, 3) %>% as.numeric,
-               opt_sol$deicision_vars[source_index] %>% substr(2, 2) %>% as.numeric)
-opt_sol$j <- c(opt_sol$deicision_vars[flow_index] %>% substr(4, 4) %>% as.numeric,
-               opt_sol$deicision_vars[source_index] %>% substr(2, 2) %>% as.numeric)
-opt_sol <- opt_sol %>%
-  left_join(coordinates %>% select(-j), by="i") %>% 
-  left_join(coordinates %>% select(-i), by="j") %>% 
-  rename(source_x=x.x,
-         source_y=y.x,
-         destination_x=x.y,
-         destination_y=y.y)
-
-coordinates %>% ggplot(aes(x=x, y=y)) +
-  geom_point() +
-  geom_text(label=coordinates$i, nudge_x = 0.05, nudge_y = 0) +
-  labs(x="", y="") +
-  geom_segment(data=opt_sol[flow_index,],
-               aes(x=source_x, 
-                   y=source_y, 
-                   xend=destination_x,
-                   yend=destination_y),
-               linewidth = 5*opt_sol$optimal_sols[flow_index]/total_flow,
-               arrow=arrow(angle=10,
-                           # length=unit(0.1, "cm"),
-                           type="closed")
-  ) +
-  geom_text(data=opt_sol[source_index,],
-            aes(x=source_x, y=source_y),
-            label=opt_sol[source_index,]$optimal_sols %>% round(1),
-            color="red",
-            nudge_x = c(0.1, 0), nudge_y = c(-0.1, 0.1))
-opt_sol
+A1[,-zero_d_vars_index] %*% matrix(result_obj_log_seizure$pool[[2]]$xn, ncol=1)
