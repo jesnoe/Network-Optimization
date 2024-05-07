@@ -74,7 +74,7 @@ cocaine_annual_seizures <- cocaine %>%
             max_weight=max(Nt.Wt, na.rm=T),
             total_cocaine_weight=sum(Nt.Wt*Potency/100, na.rm=T),
             avg_cocaine_weight=mean(Nt.Wt*Potency/100, na.rm=T),
-            med_cocaine_weight=median(Nt.Wt*Potency/100, na.rm=T),)
+            med_cocaine_weight=median(Nt.Wt*Potency/100, na.rm=T))
 
 cocaine_annual_prices <- cocaine %>% 
   filter(MethAcq == "P" & Nt.Wt >= 5 & Nt.Wt <= 1000) %>% 
