@@ -126,8 +126,15 @@ for (period in periods) {
     summarise(max_weight=max(Nt.Wt, na.rm=T),
               max_cocaine_weight=max(Nt.Wt*Potency/100, na.rm=T))
   
+  overdose_period <- overdose %>% 
+    filter(!is.na(state) & year %in% period) %>%
+    group_by(state) %>% 
+    summarise(avg_death=mean(deaths, na.rm=T),
+              med_death=median(deaths, na.rm=T))
+  
   N <- nrow(price_period)
   states_data <- full_join(price_period, seizure_period, by="state") %>% 
+    left_join(overdose_period, by="state") %>% 
     arrange(state) %>% 
     right_join(states %>% 
                  rename(state=state_name) %>% 
@@ -283,12 +290,37 @@ for (period in periods) {
           panel.grid.major = element_blank(),
           panel.grid.minor = element_blank()) -> max_seizure_map_period
   
+  med_overdose_map <- left_join(states %>%
+                                 rename(state=state_name) %>% 
+                                 filter(!(state %in% c("Alaska", "Hawaii"))),
+                               states_data %>% select(state, med_death),
+                               by="state")
+  med_overdose_map %>% ggplot() +
+    geom_polygon(aes(x=long,
+                     y=lat,
+                     group=group,
+                     fill=med_death),
+                 color="black") +
+    scale_fill_viridis_c(na.value="white") +
+    expand_limits(x=allowed_flows_map$long, y=allowed_flows_map$lat) +
+    coord_quickmap() +
+    labs(x="", y="", fill="Median deaths") +
+    theme_bw() + 
+    theme(axis.ticks = element_blank(),
+          axis.line =  element_blank(),
+          axis.text = element_blank(),
+          panel.border = element_blank(),
+          panel.grid.major = element_blank(),
+          panel.grid.minor = element_blank()) -> med_overdose_map_period
+  
   ggsave(paste0("Cocaine Network Optimization/Figs/median price restricted flows (", period[1], "-", period[length(period)], ").png"),
          med_price_direction_map, scale=1.5)
   ggsave(paste0("Cocaine Network Optimization/Figs/average price restricted flows (", period[1], "-", period[length(period)], ").png"),
          avg_price_direction_map, scale=1.5)
   ggsave(paste0("Cocaine Network Optimization/Figs/log max seizure map (", period[1], "-", period[length(period)], ").png"),
          max_seizure_map_period, scale=1.5)
+  ggsave(paste0("Cocaine Network Optimization/Figs/median death map (", period[1], "-", period[length(period)], ").png"),
+         med_overdose_map_period, scale=1.5)
 }
 cocaine_annual_seizures <- cocaine %>%
   filter(MethAcq == "S") %>% 
