@@ -86,7 +86,7 @@ find_state_index <- Vectorize(find_state_index)
 period <- years3
 price_period <- cocaine %>%
   filter(state != "District of Columbia") %>% 
-  filter(!is.na(state) & Seize.Year %in% period & Nt.Wt >= 5 & Nt.Wt <= 1000) %>%
+  filter(!is.na(state) & Seize.Year %in% period & adjusted_price > 0 & Nt.Wt >= 5 & Nt.Wt <= 1000) %>%
   group_by(state) %>% 
   summarise(avg_price=mean(adjusted_price, na.rm=T),
             med_price=median(adjusted_price, na.rm=T))
@@ -104,6 +104,36 @@ overdose_period <- overdose %>%
   summarise(avg_death=mean(deaths, na.rm=T),
             med_death=median(deaths, na.rm=T))
 
+t_test_summary <- tibble()
+for (i in 1:N) {
+  state <- states_data$state[i]
+  bordering_states <- neighbor[[state]]
+  
+  state_prices <- cocaine_prices %>% 
+    filter(Seize.Year %in% period & state == state) %>% 
+    pull(adjusted_price)
+  
+  if (length(state_prices) < 3) next
+  
+  for(bordering_state in bordering_states) {
+    bordering_state_prices <- cocaine_prices %>% 
+      filter(Seize.Year %in% period & state == bordering_state) %>% 
+      pull(adjusted_price)
+    
+    if (length(bordering_state_prices) < 3) next
+    price_t_test <- t.test(state_prices, bordering_state_prices)
+    t_test_summary <- rbind(t_test_summary,
+                            tibble(state_index=i,
+                                   bordering_state_index=states_data$states_index[which(states_data$state == bordering_state)],
+                                   state=state,
+                                   bordering_state=bordering_state,
+                                   mean_state=price_t_test$estimate[1],
+                                   mean_bordering_state=price_t_test$estimate[2],
+                                   p_value=price_t_test$p.value))
+  }
+}
+t_test_summary
+
 N <- nrow(price_period)
 states_data <- full_join(price_period, seizure_period, by="state") %>% 
   left_join(overdose_period, by="state") %>% 
@@ -117,6 +147,7 @@ states_data <- full_join(price_period, seizure_period, by="state") %>%
 
 states_data$med_death <- ifelse(is.na(states_data$med_death), 0, states_data$med_death)  
 states_data$max_weight <- ifelse(is.na(states_data$max_weight), 0, states_data$max_weight)
+
 
 # Optimization
 {
@@ -168,13 +199,19 @@ states_data$max_weight <- ifelse(is.na(states_data$max_weight), 0, states_data$m
   
   # Directionality of flow
   less_than_price <- c()
-  for (i in 1:(n_d_vars - 2*N)) {
+  for (i in 1:(n_d_vars-2*N)) {
     var <- d_vars[i]
     comma_index <- which(strsplit(var, "")[[1]] == ",")
     dot_index <- which(strsplit(var, "")[[1]] == ".") - 1
     source_index <- substr(var, 2, comma_index - 1) %>% as.numeric
     destination_index <- substr(var, comma_index + 1, dot_index) %>% as.numeric
     if (is.na(price[destination_index]) | is.na(price[source_index])) next
+    if (source_index %in% t_test_summary$state_index & destination_index %in% t_test_summary$bordering_state_index) {
+      if (t_test_summary %>%
+          filter(state_index==source_index & bordering_state_index == destination_index) %>% 
+          pull(p_value) > 0.05) next
+    }
+    
     if (price[destination_index] < price[source_index]) less_than_price <- c(less_than_price, i)
   }
   zero_d_vars_index <- unique(less_than_price) %>% sort
@@ -245,14 +282,14 @@ states_data$max_weight <- ifelse(is.na(states_data$max_weight), 0, states_data$m
 # PoolSearchMode=2
 epsilon <- 1
 less_than_price <- c()
-for (i in 1:(n_d_vars - 2*N)) {
+for (i in 1:(n_d_vars-2*N)) {
   var <- d_vars[i]
   comma_index <- which(strsplit(var, "")[[1]] == ",")
   dot_index <- which(strsplit(var, "")[[1]] == ".") - 1
   source_index <- substr(var, 2, comma_index - 1) %>% as.numeric
   destination_index <- substr(var, comma_index + 1, dot_index) %>% as.numeric
   if (is.na(price[destination_index]) | is.na(price[source_index])) next
-  if (price[destination_index] < price[source_index]*epsilon) less_than_price <- c(less_than_price, i)
+  if (price[destination_index] < price[source_index]) less_than_price <- c(less_than_price, i)
 }
 zero_d_vars_index <- unique(less_than_price) %>% sort
 n_zero_d_vars <- length(zero_d_vars_index)
@@ -296,6 +333,16 @@ for (alpha in seq(1, 0, by=-0.1)) {
   result_flow_index <- grep("w", opt_sol$deicision_vars)
   result_source_index <- grep("S", opt_sol$deicision_vars)
   max_flow <- max(opt_sol$optimal_sols[result_flow_index])
+  
+  opt_sol %>% write.csv(paste0("Cocaine Network Optimization/Results/optimal solution equal mean test",
+                               period[1], "-", period[length(period)],
+                               " (alpha=",
+                               alpha,
+                               ", z=",
+                               result_alpha_sum$objval,
+                               ").csv"),
+                        row.names=F)
+  
   
   opt_sol <- cbind(opt_sol, find_state_index(opt_sol$deicision_vars) %>% t) %>% 
     rename(i="1", j="2")
@@ -344,10 +391,12 @@ for (alpha in seq(1, 0, by=-0.1)) {
               label=opt_sol[result_source_index,]$optimal_sols %>% round(1),
               color="red",
               nudge_x = c(0.1, 0), nudge_y = c(-0.5, 0)) -> optimal_network_map
-  ggsave(paste0("Cocaine Network Optimization/Results/optimal networks ",
+  ggsave(paste0("Cocaine Network Optimization/Results/optimal networks equal mean test",
                 period[1], "-", period[length(period)],
                 " (alpha=",
                 alpha,
+                ", z=",
+                result_alpha_sum$objval,
                 ").png"),
          optimal_network_map, scale=1.5)
 }
@@ -441,7 +490,7 @@ for (i in 1:(n_d_vars - 2*N)) {
 zero_d_vars_index <- unique(less_than_price) %>% sort
 n_zero_d_vars <- length(zero_d_vars_index)
 
-alpha <- 0.9
+alpha <- 1
 epsilon_s <- .46
 epsilon_s_results <- data.frame()
 for (epsilon_s in seq(0, 1, by=0.02)) {
@@ -483,6 +532,17 @@ for (alpha_i in c(1, .96, .9)) {
     result_flow_index <- grep("w", opt_sol$deicision_vars)
     result_source_index <- grep("S", opt_sol$deicision_vars)
     max_flow <- max(opt_sol$optimal_sols[result_flow_index])
+    
+    opt_sol %>% write.csv(paste0("Cocaine Network Optimization/Results/optimal solution ",
+                                 period[1], "-", period[length(period)],
+                                 " (alpha=",
+                                 alpha_i,
+                                 ", epsilton_s=",
+                                 epsilon_si,
+                                 ", z=",
+                                 result_epsilon_s_sum$objval,
+                                 ").csv"),
+                          row.names=F)
     
     opt_sol <- cbind(opt_sol, find_state_index(opt_sol$deicision_vars) %>% t) %>% 
       rename(i="1", j="2")
@@ -535,9 +595,10 @@ for (alpha_i in c(1, .96, .9)) {
                   period[1], "-", period[length(period)],
                   " (alpha=",
                   alpha_i,
-                  ", ",
-                  "epsilon_s=",
+                  ", epsilton_s=",
                   epsilon_si,
+                  ", z=",
+                  result_epsilon_s_sum$objval,
                   ").png"),
            optimal_network_map, scale=1.5)
   }

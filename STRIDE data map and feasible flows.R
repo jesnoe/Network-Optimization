@@ -16,7 +16,7 @@ stride$Post.Price <- as.numeric(stride$Post.Price)
 # for (i in c(1,2,6,7)) {
 #   stride[,i] <- as.factor(stride[,i]) 
 # }
-
+stride$State <- ifelse(stride$State == "NB", "NE", stride$State)
 stride %>% pull(Drug) %>% unique %>% sort
 stride %>% filter(grepl("COCAINE", Drug)) %>% pull(Drug) %>% unique
 
@@ -356,97 +356,146 @@ cocaine_annual_prices %>% filter(Seize.Year == ex_year) %>% arrange(state) %>% a
 # 7: Washington  8: Illinois  9: New York
   
 
+## price direction with t-test
+cocaine_prices <- cocaine %>% 
+  filter(state != "District of Columbia" & !is.na(state) & Seize.Year %in% period & adjusted_price > 0 & Nt.Wt >= 5 & Nt.Wt <= 1000)
 
-
-# Optimization
-{
-  ex_year <- 2012
-  state_names <- names(neighbor)
-  states_data <- cocaine_annual_prices %>%
-    filter(Seize.Year == ex_year & state %in% state_names) %>% 
-    arrange(state) %>% 
-    left_join(cocaine_annual_seizures %>% filter(Seize.Year == ex_year & state %in% state_names) %>% select(-Seize.Year), by="state") %>% 
-    left_join(cocaine_annual_purities %>% filter(Seize.Year == ex_year & state %in% state_names) %>% select(-Seize.Year), by="state") %>% 
-    left_join(overdose %>% filter(year == ex_year & state %in% state_names) %>% select(-year), by="state") %>% 
-    filter(!is.na(sum(n_price, n_weight, deaths)))
+periods <- list(p1=years1, p2=years2, p3=years3)
+for (period in periods) {
+  price_period <- cocaine %>%
+    filter(state != "District of Columbia") %>% 
+    filter(!is.na(state) & Seize.Year %in% period & adjusted_price > 0 & Nt.Wt >= 5 & Nt.Wt <= 1000) %>%
+    group_by(state) %>% 
+    summarise(avg_price=mean(adjusted_price, na.rm=T),
+              med_price=median(adjusted_price, na.rm=T))
   
-  # all possible sources
-  N <- nrow(states_data) # Total number of nodes
-  states_data <- tibble(state=states_data$state, states_data=1:N) %>% 
+  seizure_period <- cocaine %>%
+    filter(state != "District of Columbia") %>% 
+    filter(!is.na(state) & Seize.Year %in% period) %>%
+    group_by(state) %>% 
+    summarise(max_weight=max(Nt.Wt, na.rm=T),
+              max_cocaine_weight=max(Nt.Wt*Potency/100, na.rm=T))
+  
+  overdose_period <- overdose %>% 
+    filter(!is.na(state) & year %in% period) %>%
+    group_by(state) %>% 
+    summarise(avg_death=mean(deaths, na.rm=T),
+              med_death=median(deaths, na.rm=T))
+  
+  N <- nrow(price_period)
+  states_data <- full_join(price_period, seizure_period, by="state") %>% 
+    left_join(overdose_period, by="state") %>% 
     arrange(state) %>% 
-    left_join(states %>% 
-                rename(state=state_name) %>% 
-                group_by(state) %>% 
-                summarise(long=mean(long), lat=mean(lat)), by="state")
+    right_join(states %>% 
+                 rename(state=state_name) %>% 
+                 filter(!(state %in% c("Alaska", "District of Columbia", "Hawaii"))) %>% 
+                 group_by(state) %>% 
+                 summarise(long=mean(long), lat=mean(lat)), by="state") %>% 
+    mutate(states_index=1:length(state))
   
   d_vars <- c()
   for (i in 1:N) {
     bordering_states_index <- states_data %>%
-      filter(state %in% neighbor[[states_data$state[i]]]) %>% pull(states_data)
+      filter(state %in% neighbor[[states_data$state[i]]]) %>% pull(states_index)
     d_vars <- c(d_vars, paste0("w", i, ",", bordering_states_index, "."))
   }
-  
-  d_vars <- c(d_vars, paste0("S", 1:N))
-  d_vars <- c(d_vars, paste0("x", 1:N))
   n_d_vars <- length(d_vars)
-  PO <- 100 # overdose proportional parameter
-  # PS <- 5 # seizure proportionality parameter
-  epsilon <- 0.9
-}
-
-{
-  # seizure <- states_data$total_weight
-  seizure <- states_data$max_weight
-  log_seizure <- log(seizure)
-  O <- states_data$deaths
-  price <- states_data$med_price
-  purity <- states_data$med_purity
   
-  # Constraints
-  # Conservation of flow/consumption
-  A1 <- matrix(0, N, n_d_vars)
+  t_test_summary <- tibble()
   for (i in 1:N) {
-    A1[i, which(str_match(d_vars, paste0("w", i, ","))[,1] == paste0("w", i, ","))] <- -1
-    A1[i, which(str_match(d_vars, paste0(",", i, "."))[,1] == paste0(",", i, "."))] <- 1
-    A1[i, n_d_vars-2*N+i] <- 1
+    state_i <- states_data$state[i]
+    bordering_states <- neighbor[[state_i]]
+    
+    state_prices <- cocaine_prices %>% 
+      filter(Seize.Year %in% period & state == state_i) %>% 
+      pull(adjusted_price)
+    
+    if (length(state_prices) < 3) next
+    
+    for(bordering_state in bordering_states) {
+      bordering_state_prices <- cocaine_prices %>% 
+        filter(Seize.Year %in% period & state == bordering_state) %>% 
+        pull(adjusted_price)
+      
+      if (length(bordering_state_prices) < 3) next
+      price_t_test <- t.test(state_prices, bordering_state_prices)
+      t_test_summary <- rbind(t_test_summary,
+                              tibble(state_index=i,
+                                     bordering_state_index=states_data$states_index[which(states_data$state == bordering_state)],
+                                     state=state_i,
+                                     bordering_state=bordering_state,
+                                     mean_state=price_t_test$estimate[1],
+                                     mean_bordering_state=price_t_test$estimate[2],
+                                     p_value=price_t_test$p.value))
+    }
   }
-  b1 <- PO*O/sum(O)
-  b1_alt <- PO*O/sum(O)
+  # write.csv(t_test_summary, paste0("Cocaine Network Optimization/t_test_summary (", period[1], "-", period[length(period)], ").csv"), row.names=F)
   
-  # State seizure
-  A2 <- matrix(0, N, n_d_vars)
-  for (i in 1:N) {
-    A2[i, which(str_match(d_vars, paste0(",", i, "."))[,1] == paste0(",", i, "."))] <- 1
-    A2[i, n_d_vars-2*N+i] <- 1
-  }
-  b2_ratio <- 100*seizure/sum(seizure)
-  b2_log_ratio <- 100*log_seizure/sum(log_seizure)
-  
-  # Directionality of flow
+  price <- states_data$avg_price
   less_than_price <- c()
-  greater_than_purity <- c()
-  for (i in 1:(n_d_vars - 2*N)) {
+  for (i in 1:(n_d_vars)) {
     var <- d_vars[i]
     comma_index <- which(strsplit(var, "")[[1]] == ",")
     dot_index <- which(strsplit(var, "")[[1]] == ".") - 1
     source_index <- substr(var, 2, comma_index - 1) %>% as.numeric
     destination_index <- substr(var, comma_index + 1, dot_index) %>% as.numeric
+    if (is.na(price[destination_index]) | is.na(price[source_index])) next
+    if (source_index %in% t_test_summary$state_index & destination_index %in% t_test_summary$bordering_state_index) {
+      if (t_test_summary %>%
+          filter(state_index==source_index & bordering_state_index == destination_index) %>% 
+          pull(p_value) > 0.05) next
+    }
+         
     if (price[destination_index] < price[source_index]) less_than_price <- c(less_than_price, i)
-    if (purity[destination_index] > purity[source_index]) greater_than_purity <- c(greater_than_purity, i)
   }
-  zero_d_vars_index <- unique(c(less_than_price, greater_than_purity)) %>% sort
-  n_zero_d_vars <- length(zero_d_vars_index)
+  restricted_d_vars_index <- unique(less_than_price) %>% sort
+  d_var_restricted <- d_vars[-restricted_d_vars_index]
   
-  # Source indicator
-  A3 <- matrix(0, 2*N, n_d_vars)
-  for (i in 1:N) {
-    A3[i, which(d_vars %in% c(paste0("S", i), paste0("x", i)))] <- c(1, -1)
-    A3[i+N, which(d_vars %in% c(paste0("S", i), paste0("x", i)))] <- c(-0.01, 1)
-  }
-  b3 <- rep(0, 2*N)
+  allowed_flows <- data.frame(deicision_vars=d_var_restricted)
+  allowed_flows <- cbind(allowed_flows, find_state_index(allowed_flows$deicision_vars) %>% t) %>% 
+    rename(i="1", j="2")
   
-  A_source_limit <- matrix(0, 1, n_d_vars)
-  A_source_limit[1, grep("S", d_vars)] <- 1
-  b_source_limit <- 100
+  allowed_flows$long_i <- states_data$long[allowed_flows$i]
+  allowed_flows$lat_i <- states_data$lat[allowed_flows$i]
+  allowed_flows$long_j <- states_data$long[allowed_flows$j]
+  allowed_flows$lat_j <- states_data$lat[allowed_flows$j]
+  
+  allowed_flows_map <- left_join(states %>%
+                                   rename(state=state_name) %>% 
+                                   filter(!(state %in% c("Alaska", "Hawaii"))),
+                                 states_data %>% select(state, avg_price),
+                                 by="state")
+  allowed_flows_map %>% ggplot() +
+    geom_polygon(aes(x=long,
+                     y=lat,
+                     group=group,
+                     fill=avg_price),
+                 color="black") +
+    scale_fill_viridis_c(na.value="white") +
+    expand_limits(x=allowed_flows_map$long, y=allowed_flows_map$lat) +
+    coord_quickmap() +
+    labs(x="", y="") +
+    theme_bw() + 
+    theme(axis.ticks = element_blank(),
+          axis.line =  element_blank(),
+          axis.text = element_blank(),
+          panel.border = element_blank(),
+          panel.grid.major = element_blank(),
+          panel.grid.minor = element_blank()) +
+    geom_point(data=states_data,
+               aes(x=long, y=lat)) +
+    geom_segment(data=allowed_flows[,],
+                 aes(x=long_i, 
+                     y=lat_i, 
+                     xend=long_j,
+                     yend=lat_j),
+                 linewidth = 0.3,
+                 color="red",
+                 arrow=arrow(angle=10,
+                             length=unit(0.2, "cm"),
+                             type="closed")
+    ) -> avg_price_direction_map
+  
+  ggsave(paste0("Cocaine Network Optimization/Figs/t-test average price restricted flows (", period[1], "-", period[length(period)], ").png"),
+         avg_price_direction_map, scale=1.5)
 }
-

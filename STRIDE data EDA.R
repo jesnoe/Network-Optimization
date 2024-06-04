@@ -87,7 +87,7 @@ find_state_index <- Vectorize(find_state_index)
 period <- years3
 price_period <- cocaine %>%
   filter(state != "District of Columbia") %>% 
-  filter(!is.na(state) & Seize.Year %in% period & Nt.Wt >= 5 & Nt.Wt <= 1000) %>%
+  filter(!is.na(state) & Seize.Year %in% period & adjusted_price > 0 & Nt.Wt >= 5 & Nt.Wt <= 1000) %>%
   group_by(state) %>% 
   summarise(avg_price=mean(adjusted_price, na.rm=T),
             med_price=median(adjusted_price, na.rm=T))
@@ -122,23 +122,45 @@ states_data$max_weight <- ifelse(is.na(states_data$max_weight), 0, states_data$m
 # monthly price
 cocaine_monthly <- cocaine %>%
   filter(state != "District of Columbia") %>% 
-  filter(!is.na(state) & Seize.Year %in% period & Nt.Wt >= 5 & Nt.Wt <= 1000) %>%
+  filter(!is.na(state) & Nt.Wt >= 5 & Nt.Wt <= 1000) %>%
   group_by(state, Seize.Year, Seize.Month) %>% 
-  summarise(avg_price=mean(adjusted_price, na.rm=T),
-            med_price=median(adjusted_price, na.rm=T)) %>% 
+  summarise(n_price=sum(!is.na(adjusted_price)),
+            med_price=median(adjusted_price, na.rm=T),
+            avg_price=mean(adjusted_price, na.rm=T),
+            sd_price=sd(adjusted_price, na.rm=T)
+            ) %>% 
   relocate(Seize.Year, Seize.Month) %>% 
   arrange(Seize.Year, Seize.Month)
+
+# cocaine_monthly %>% filter(state == "Arizona") %>% write.csv("Cocaine Network Optimization/monthly price (Arizona).csv", row.names=F)
+# cocaine_monthly %>% filter(state == "California") %>% write.csv("Cocaine Network Optimization/monthly price (California).csv", row.names=F)
 
 FL_months <- (cocaine_monthly %>% filter(state == "Florida") %>% select(Seize.Year, Seize.Month))[,-1]
 GA_months <- (cocaine_monthly %>% filter(state == "Georgia") %>% select(Seize.Year, Seize.Month))[,-1]
 FL_GA_price <- cocaine_monthly %>%
-  filter(state %in% c("Florida", "Georgia")) %>% 
+  filter(state %in% c("Florida", "Georgia") & Seize.Year %in% period) %>% 
   pivot_wider(names_from = "state", values_from = c("avg_price", "med_price"))
 
 sum(FL_GA_price$med_price_Florida > FL_GA_price$med_price_Georgia, na.rm=T) # 21
 sum(FL_GA_price$med_price_Florida < FL_GA_price$med_price_Georgia, na.rm=T) # 31
 sum(FL_GA_price$avg_price_Florida > FL_GA_price$avg_price_Georgia, na.rm=T) # 29
 sum(FL_GA_price$avg_price_Florida < FL_GA_price$avg_price_Georgia, na.rm=T) # 24
+
+
+AZ_months <- (cocaine_monthly %>% filter(state == "Arizona") %>% select(Seize.Year, Seize.Month))[,-1]
+CA_months <- (cocaine_monthly %>% filter(state == "California") %>% select(Seize.Year, Seize.Month))[,-1]
+AZ_CA_price <- cocaine_monthly %>%
+  select(Seize.Year, Seize.Month, state, med_price, avg_price) %>% 
+  filter(state %in% c("Arizona", "California") & Seize.Year %in% period) %>% 
+  pivot_wider(names_from = "state", values_from = c("avg_price", "med_price"))
+
+cocaine %>% filter(state == "Arizona" & !is.na(adjusted_price)) %>% pull(adjusted_price) %>% sort
+cocaine %>% filter(state == "California" & !is.na(adjusted_price)) %>% pull(adjusted_price) %>% sort
+
+sum(AZ_CA_price$med_price_Arizona > AZ_CA_price$med_price_California, na.rm=T) # 1
+sum(AZ_CA_price$med_price_Arizona < AZ_CA_price$med_price_California, na.rm=T) # 8
+sum(AZ_CA_price$avg_price_Arizona > AZ_CA_price$avg_price_California, na.rm=T) # 1
+sum(AZ_CA_price$avg_price_Arizona < AZ_CA_price$avg_price_California, na.rm=T) # 8
 
 # price/purity vs. seizure weight
 cocaine %>% 
