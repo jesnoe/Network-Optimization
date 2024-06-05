@@ -429,7 +429,7 @@ for (period in periods) {
                                      p_value=price_t_test$p.value))
     }
   }
-  # write.csv(t_test_summary, paste0("Cocaine Network Optimization/t_test_summary (", period[1], "-", period[length(period)], ").csv"), row.names=F)
+  write.csv(t_test_summary, paste0("Cocaine Network Optimization/t_test_summary (", period[1], "-", period[length(period)], ").csv"), row.names=F)
   
   price <- states_data$avg_price
   less_than_price <- c()

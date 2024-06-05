@@ -46,6 +46,9 @@ cocaine <- stride %>%
   rename(state=state_name) %>% 
   relocate(state)
 
+cocaine_prices <- cocaine %>% 
+  filter(state != "District of Columbia" & !is.na(state) & Seize.Year %in% period & adjusted_price > 0 & Nt.Wt >= 5 & Nt.Wt <= 1000)
+
 overdose <- read.csv("Cocaine Network Optimization/Overdose Deaths 1999-2016.csv") %>% as_tibble
 VSRR <- read.csv("Cocaine Network Optimization/VSRR_Provisional_Drug_Overdose_Death_Counts (2015-2023).csv") %>%
   as_tibble %>% 
@@ -104,6 +107,21 @@ overdose_period <- overdose %>%
   summarise(avg_death=mean(deaths, na.rm=T),
             med_death=median(deaths, na.rm=T))
 
+
+N <- nrow(price_period)
+states_data <- full_join(price_period, seizure_period, by="state") %>% 
+  left_join(overdose_period, by="state") %>% 
+  arrange(state) %>% 
+  right_join(states %>% 
+               rename(state=state_name) %>% 
+               filter(!(state %in% c("Alaska", "District of Columbia", "Hawaii"))) %>% 
+               group_by(state) %>% 
+               summarise(long=mean(long), lat=mean(lat)), by="state") %>% 
+  mutate(states_index=1:length(state))
+
+states_data$med_death <- ifelse(is.na(states_data$med_death), 0, states_data$med_death)  
+states_data$max_weight <- ifelse(is.na(states_data$max_weight), 0, states_data$max_weight)
+
 t_test_summary <- tibble()
 for (i in 1:N) {
   state_i <- states_data$state[i]
@@ -133,21 +151,6 @@ for (i in 1:N) {
   }
 }
 t_test_summary
-
-N <- nrow(price_period)
-states_data <- full_join(price_period, seizure_period, by="state") %>% 
-  left_join(overdose_period, by="state") %>% 
-  arrange(state) %>% 
-  right_join(states %>% 
-               rename(state=state_name) %>% 
-               filter(!(state %in% c("Alaska", "District of Columbia", "Hawaii"))) %>% 
-               group_by(state) %>% 
-               summarise(long=mean(long), lat=mean(lat)), by="state") %>% 
-  mutate(states_index=1:length(state))
-
-states_data$med_death <- ifelse(is.na(states_data$med_death), 0, states_data$med_death)  
-states_data$max_weight <- ifelse(is.na(states_data$max_weight), 0, states_data$max_weight)
-
 
 # Optimization
 {
@@ -422,6 +425,8 @@ for (alpha_i in c(1, .9, .8)) {
     model_epsilon_s$rhs        <- c(b1, epsilon_si*b2_ratio, b3, b_source_limit)
     result_epsilon_s_sum       <- gurobi(model_epsilon_s, list(Method=-1))
     
+    opt_val_i <- round(result_epsilon_s_sum$objval, 2)
+    
     opt_sol <- data.frame(deicision_vars=d_vars[-zero_d_vars_index], optimal_sols=result_epsilon_s_sum$pool[[1]]$xn) %>%
       filter(optimal_sols > 0 & !grepl("x", deicision_vars))
     result_flow_index <- grep("w", opt_sol$deicision_vars)
@@ -435,7 +440,7 @@ for (alpha_i in c(1, .9, .8)) {
                                  ", epsilton_s=",
                                  epsilon_si,
                                  ", z=",
-                                 result_epsilon_s_sum$objval,
+                                 opt_val_i,
                                  ").csv"),
                           row.names=F)
     
@@ -461,7 +466,7 @@ for (alpha_i in c(1, .9, .8)) {
       scale_fill_viridis_c(na.value="white") +
       expand_limits(x=overdose_map_year$long, y=overdose_map_year$lat) +
       coord_quickmap() +
-      labs(x="", y="", title=bquote(paste(epsilon[s], "=", .(epsilon_si), ", ", alpha, "=", .(alpha_i)))) +
+      labs(x="", y="", title=bquote(paste(epsilon[s], "=", .(epsilon_si), ", ", alpha, "=", .(alpha_i), ", opt_val=", .(opt_val_i)) )) +
       theme_bw() + 
       theme(axis.ticks = element_blank(),
             axis.line =  element_blank(),
@@ -493,8 +498,8 @@ for (alpha_i in c(1, .9, .8)) {
                   ", epsilton_s=",
                   epsilon_si,
                   ", z=",
-                  result_epsilon_s_sum$objval,
+                  opt_val_i,
                   ").png"),
-           optimal_network_map, scale=1.5)
+           optimal_network_map, width=20, height=10, unit="cm")
   }
 }
