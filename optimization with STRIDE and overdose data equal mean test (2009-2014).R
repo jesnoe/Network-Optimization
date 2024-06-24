@@ -17,8 +17,6 @@ stride$Post.Price <- as.numeric(stride$Post.Price)
 #   stride[,i] <- as.factor(stride[,i]) 
 # }
 stride$State <- ifelse(stride$State == "NB", "NE", stride$State)
-stride %>% pull(Drug) %>% unique %>% sort
-stride %>% filter(grepl("COCAINE", Drug)) %>% pull(Drug) %>% unique
 
 neighbor_xlsx <- read_xlsx("Cocaine Network Optimization/states neighborhood.xlsx")
 neighbor <- list()
@@ -46,8 +44,6 @@ cocaine <- stride %>%
   rename(state=state_name) %>% 
   relocate(state)
 
-cocaine_prices <- cocaine %>% 
-  filter(state != "District of Columbia" & !is.na(state) & Seize.Year %in% period & adjusted_price > 0 & Nt.Wt >= 5 & Nt.Wt <= 1000)
 
 overdose <- read.csv("Cocaine Network Optimization/Overdose Deaths 1999-2016.csv") %>% as_tibble
 VSRR <- read.csv("Cocaine Network Optimization/VSRR_Provisional_Drug_Overdose_Death_Counts (2015-2023).csv") %>%
@@ -121,6 +117,10 @@ states_data <- full_join(price_period, seizure_period, by="state") %>%
 
 states_data$med_death <- ifelse(is.na(states_data$med_death), 0, states_data$med_death)  
 states_data$max_weight <- ifelse(is.na(states_data$max_weight), 0, states_data$max_weight)
+
+
+cocaine_prices <- cocaine %>% 
+  filter(state != "District of Columbia" & !is.na(state) & Seize.Year %in% period & adjusted_price > 0 & Nt.Wt >= 5 & Nt.Wt <= 1000)
 
 t_test_summary <- tibble()
 for (i in 1:N) {
@@ -388,7 +388,7 @@ for (alpha in seq(1, 0, by=-0.1)) {
 }
 
 # epsilon_seizure test
-alpha <- 1
+alpha <- 0.7
 epsilon_s <- .46
 epsilon_s_results <- data.frame()
 for (epsilon_s in seq(0, 1, by=0.02)) {
@@ -412,7 +412,7 @@ names(epsilon_s_results) <- c("epsilon_s", "feasibility", "n_opt_sols")
 epsilon_s_results
 states_data %>% select(state, max_weight, med_death)
 
-for (alpha_i in c(1, .9, .8)) {
+for (alpha_i in seq(0.7, 0, by=-0.1)) {
   for (epsilon_si in seq(0, 1, by=.2)) {
     model_epsilon_s <- list()
     model_epsilon_s$obj        <- c(rep(1-alpha_i, n_d_vars - n_zero_d_vars - 2*N), rep(0, N), rep(alpha_i, N))
