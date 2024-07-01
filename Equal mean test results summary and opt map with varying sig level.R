@@ -120,7 +120,7 @@ states_data$med_death <- ifelse(is.na(states_data$med_death), 0, states_data$med
 states_data$max_weight <- ifelse(is.na(states_data$max_weight), 0, states_data$max_weight)
 
 # Optimization
-alpha_t_test <- 0.10
+alpha_t_test <- 0.05
 {
   states_data <- states_data %>% 
     filter(!is.na(med_death))
