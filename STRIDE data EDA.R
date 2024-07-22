@@ -33,6 +33,7 @@ library(lubridate)
     mutate(state=as.factor(State),
            MethAcq=as.factor(MethAcq),
            Drug=as.factor(Drug),
+           Potency=ifelse(Potency > 100, Potency/10, Potency),
            Seize.Year=as.numeric(Seize.Year),
            Seize.Month=as.numeric(Seize.Month),
            adjusted_price=Post.Price/(Nt.Wt*Potency/100)) %>% 
@@ -187,3 +188,63 @@ cocaine %>%
 ggsave("Cocaine Network Optimization/Figs/price vs seizrue Georgia.png", GA_price_plot, width=30, height=20, unit="cm")
 
  
+cocaine %>% 
+  filter(Seize.Year %in% years3 & state == "California", !is.na(adjusted_price)) %>% 
+  mutate(Seize.Year=as.factor(Seize.Year)) %>% 
+  ggplot(aes(x=Nt.Wt,
+             y=adjusted_price,
+             color=Seize.Year)) +
+  geom_point() + 
+  lims(x=c(0, 300), y=c(0, 1000)) +
+  labs(title="California") -> CA_price_plot
+ggsave("Cocaine Network Optimization/Figs/price vs seizrue California.png", CA_price_plot, width=30, height=20, unit="cm")
+
+cocaine %>% 
+  filter(Seize.Year %in% years3 & state == "Arizona", !is.na(adjusted_price)) %>% 
+  mutate(Seize.Year=as.factor(Seize.Year)) %>% 
+  ggplot(aes(x=Nt.Wt,
+             y=adjusted_price,
+             color=Seize.Year)) +
+  geom_point() + 
+  lims(x=c(0, 300), y=c(0, 1000)) +
+  labs(title="Arizona") -> AZ_price_plot
+ggsave("Cocaine Network Optimization/Figs/price vs seizrue Arizona.png", AZ_price_plot, width=30, height=20, unit="cm")
+
+# annual avg_price
+cocaine %>% 
+  filter(Seize.Year %in% years3 & state == "Florida", !is.na(adjusted_price)) %>% 
+  mutate(Seize.Year=as.factor(Seize.Year)) %>% 
+  group_by(Seize.Year) %>% 
+  summarize(avg_price=mean(adjusted_price)) %>% 
+  pull(avg_price) %>% 
+  ts(start=2009, end=2014) -> FL_price_ts
+
+cocaine %>% 
+  filter(Seize.Year %in% years3 & state == "Georgia", !is.na(adjusted_price)) %>% 
+  mutate(Seize.Year=as.factor(Seize.Year)) %>% 
+  group_by(Seize.Year) %>% 
+  summarize(avg_price=mean(adjusted_price)) %>% 
+  pull(avg_price) %>% 
+  ts(start=2009, end=2014) -> GA_price_ts
+
+cocaine %>% 
+  filter(Seize.Year %in% years3 & state == "California", !is.na(adjusted_price)) %>% 
+  mutate(Seize.Year=as.factor(Seize.Year)) %>% 
+  group_by(Seize.Year) %>% 
+  summarize(avg_price=mean(adjusted_price)) %>% 
+  pull(avg_price) %>% 
+  ts(start=2009, end=2014) -> CA_price_ts
+
+cocaine %>% 
+  filter(Seize.Year %in% years3 & state == "Arizona", !is.na(adjusted_price)) %>% 
+  mutate(Seize.Year=as.factor(Seize.Year)) %>% 
+  group_by(Seize.Year) %>% 
+  summarize(avg_price=mean(adjusted_price)) %>% 
+  pull(avg_price) %>% 
+  ts(start=2009, end=2014) -> AZ_price_ts
+
+autoplot(FL_price_ts, main="black=FL", xlab="Year",  ylab="avg_price") +
+  autolayer(GA_price_ts) +
+  autolayer(CA_price_ts) +
+  autolayer(AZ_price_ts) -> avg_price_plot
+ggsave("Cocaine Network Optimization/Figs/annual average prices.png", avg_price_plot, width=30, height=20, unit="cm")

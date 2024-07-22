@@ -32,6 +32,7 @@ cocaine <- stride %>%
   mutate(state=as.factor(State),
          MethAcq=as.factor(MethAcq),
          Drug=as.factor(Drug),
+         Potency=ifelse(Potency > 100, Potency/10, Potency),
          Seize.Year=as.numeric(Seize.Year),
          Seize.Month=as.numeric(Seize.Month),
          adjusted_price=Post.Price/(Nt.Wt*Potency/100)) %>% 
@@ -401,35 +402,35 @@ for (period in periods) {
   }
   n_d_vars <- length(d_vars)
   
-  t_test_summary <- tibble()
-  for (i in 1:N) {
-    state_i <- states_data$state[i]
-    bordering_states <- neighbor[[state_i]]
-    
-    state_prices <- cocaine_prices %>% 
-      filter(Seize.Year %in% period & state == state_i) %>% 
-      pull(adjusted_price)
-    
-    if (length(state_prices) < 3) next
-    
-    for(bordering_state in bordering_states) {
-      bordering_state_prices <- cocaine_prices %>% 
-        filter(Seize.Year %in% period & state == bordering_state) %>% 
-        pull(adjusted_price)
-      
-      if (length(bordering_state_prices) < 3) next
-      price_t_test <- t.test(state_prices, bordering_state_prices)
-      t_test_summary <- rbind(t_test_summary,
-                              tibble(state_index=i,
-                                     bordering_state_index=states_data$states_index[which(states_data$state == bordering_state)],
-                                     state=state_i,
-                                     bordering_state=bordering_state,
-                                     mean_state=price_t_test$estimate[1],
-                                     mean_bordering_state=price_t_test$estimate[2],
-                                     p_value=price_t_test$p.value))
-    }
-  }
-  write.csv(t_test_summary, paste0("Cocaine Network Optimization/t_test_summary (", period[1], "-", period[length(period)], ").csv"), row.names=F)
+  # t_test_summary <- tibble()
+  # for (i in 1:N) {
+  #   state_i <- states_data$state[i]
+  #   bordering_states <- neighbor[[state_i]]
+  #   
+  #   state_prices <- cocaine_prices %>% 
+  #     filter(Seize.Year %in% period & state == state_i) %>% 
+  #     pull(adjusted_price)
+  #   
+  #   if (length(state_prices) < 3) next
+  #   
+  #   for(bordering_state in bordering_states) {
+  #     bordering_state_prices <- cocaine_prices %>% 
+  #       filter(Seize.Year %in% period & state == bordering_state) %>% 
+  #       pull(adjusted_price)
+  #     
+  #     if (length(bordering_state_prices) < 3) next
+  #     price_t_test <- t.test(state_prices, bordering_state_prices)
+  #     t_test_summary <- rbind(t_test_summary,
+  #                             tibble(state_index=i,
+  #                                    bordering_state_index=states_data$states_index[which(states_data$state == bordering_state)],
+  #                                    state=state_i,
+  #                                    bordering_state=bordering_state,
+  #                                    mean_state=price_t_test$estimate[1],
+  #                                    mean_bordering_state=price_t_test$estimate[2],
+  #                                    p_value=price_t_test$p.value))
+  #   }
+  # }
+  # write.csv(t_test_summary, paste0("Cocaine Network Optimization/t_test_summary (", period[1], "-", period[length(period)], ").csv"), row.names=F)
   
   price <- states_data$avg_price
   less_than_price <- c()
@@ -496,6 +497,67 @@ for (period in periods) {
                              type="closed")
     ) -> avg_price_direction_map
   
-  ggsave(paste0("Cocaine Network Optimization/Figs/t-test average price restricted flows (", period[1], "-", period[length(period)], ").png"),
+  ggsave(paste0("Cocaine Network Optimization/Figs/average price restricted flows (", period[1], "-", period[length(period)], ").png"),
          avg_price_direction_map, scale=1.5)
+  
+  # ggsave(paste0("Cocaine Network Optimization/Figs/t-test average price restricted flows (", period[1], "-", period[length(period)], ").png"),
+  #        avg_price_direction_map, scale=1.5)
+}
+
+# purity maps
+periods <- list(p1=years1, p2=years2, p3=years3)
+for (period in periods) {
+  purity_period <- cocaine %>%
+    filter(state != "District of Columbia") %>% 
+    filter(!is.na(state) & Seize.Year %in% period & adjusted_price > 0 & Nt.Wt >= 5 & Nt.Wt <= 1000) %>%
+    group_by(state) %>% 
+    summarise(avg_purity=mean(Potency, na.rm=T),
+              med_purity=median(Potency, na.rm=T))
+  
+  purity_map <- left_join(states %>%
+                                   rename(state=state_name) %>% 
+                                   filter(!(state %in% c("Alaska", "Hawaii"))),
+                                 purity_period,
+                                 by="state")
+  purity_map %>% ggplot() +
+    geom_polygon(aes(x=long,
+                     y=lat,
+                     group=group,
+                     fill=avg_purity),
+                 color="black") +
+    scale_fill_viridis_c(na.value="white", limits=c(0,100)) +
+    expand_limits(x=purity_map$long, y=purity_map$lat) +
+    coord_quickmap() +
+    labs(x="", y="") +
+    theme_bw() + 
+    theme(axis.ticks = element_blank(),
+          axis.line =  element_blank(),
+          axis.text = element_blank(),
+          panel.border = element_blank(),
+          panel.grid.major = element_blank(),
+          panel.grid.minor = element_blank()) -> avg_purity_map
+  
+  ggsave(paste0("Cocaine Network Optimization/Figs/average purity map (", period[1], "-", period[length(period)], ").png"),
+         avg_purity_map, scale=1.5)
+  
+  purity_map %>% ggplot() +
+    geom_polygon(aes(x=long,
+                     y=lat,
+                     group=group,
+                     fill=med_purity),
+                 color="black") +
+    scale_fill_viridis_c(na.value="white", limits=c(0,100)) +
+    expand_limits(x=purity_map$long, y=purity_map$lat) +
+    coord_quickmap() +
+    labs(x="", y="") +
+    theme_bw() + 
+    theme(axis.ticks = element_blank(),
+          axis.line =  element_blank(),
+          axis.text = element_blank(),
+          panel.border = element_blank(),
+          panel.grid.major = element_blank(),
+          panel.grid.minor = element_blank()) -> med_purity_map
+  
+  ggsave(paste0("Cocaine Network Optimization/Figs/median purity map (", period[1], "-", period[length(period)], ").png"),
+         med_purity_map, scale=1.5)
 }
