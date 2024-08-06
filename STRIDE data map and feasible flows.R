@@ -573,4 +573,5 @@ cocaine_2009_2014 %>%
   group_by(state) %>% 
   summarise(avg_purity=mean(Potency, na.rm=T),
             med_purity=median(Potency, na.rm=T),
-            sd_purity=sd(Potency, na.rm=T)) %>% view
+            sd_purity=sd(Potency, na.rm=T)) -> purity_2009_2014
+purity_2009_2014$sd_purity %>% summary
