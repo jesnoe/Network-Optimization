@@ -47,7 +47,7 @@ cocaine <- stride %>%
   rename(state=state_name) %>% 
   relocate(state)
 
-overdose <- read.csv("Cocaine Network Optimization/Overdose Deaths 1999-2016.csv") %>% as_tibble
+overdose <- read_xlsx("Cocaine Network Optimization/Overdose deaths T40.4 T40.5 1999-2016.xlsx") %>% as_tibble
 VSRR <- read.csv("Cocaine Network Optimization/VSRR_Provisional_Drug_Overdose_Death_Counts (2015-2023).csv") %>%
   as_tibble %>% 
   mutate(state=State,
@@ -110,18 +110,15 @@ find_state_index <- function(d_var) {
 }
 find_state_index <- Vectorize(find_state_index)
 
-# no D.C. data
 periods <- list(p1=years1, p2=years2, p3=years3)
 for (period in periods) {
   price_period <- cocaine %>%
-    filter(state != "District of Columbia") %>% 
     filter(!is.na(state) & Seize.Year %in% period & Nt.Wt >= 5 & Nt.Wt <= 1000) %>%
     group_by(state) %>% 
     summarise(avg_price=mean(adjusted_price, na.rm=T),
               med_price=median(adjusted_price, na.rm=T))
   
   seizure_period <- cocaine %>%
-    filter(state != "District of Columbia") %>% 
     filter(!is.na(state) & Seize.Year %in% period) %>%
     group_by(state) %>% 
     summarise(max_weight=max(Nt.Wt, na.rm=T),
@@ -139,7 +136,7 @@ for (period in periods) {
     arrange(state) %>% 
     right_join(states %>% 
                  rename(state=state_name) %>% 
-                 filter(!(state %in% c("Alaska", "District of Columbia", "Hawaii"))) %>% 
+                 filter(!(state %in% c("Alaska", "Hawaii"))) %>% 
                  group_by(state) %>% 
                  summarise(long=mean(long), lat=mean(lat)), by="state") %>% 
     mutate(states_index=1:length(state))
@@ -194,20 +191,20 @@ for (period in periods) {
           axis.text = element_blank(),
           panel.border = element_blank(),
           panel.grid.major = element_blank(),
-          panel.grid.minor = element_blank()) +
-    geom_point(data=states_data,
-               aes(x=long, y=lat)) +
-    geom_segment(data=allowed_flows,
-                 aes(x=long_i, 
-                     y=lat_i, 
-                     xend=long_j,
-                     yend=lat_j),
-                 linewidth = 0.3,
-                 color="red",
-                 arrow=arrow(angle=10,
-                             length=unit(0.2, "cm"),
-                             type="closed")
-    ) -> med_price_direction_map
+          panel.grid.minor = element_blank()) -> med_price_direction_map# +
+    # geom_point(data=states_data,
+    #            aes(x=long, y=lat)) +
+    # geom_segment(data=allowed_flows,
+    #              aes(x=long_i, 
+    #                  y=lat_i, 
+    #                  xend=long_j,
+    #                  yend=lat_j),
+    #              linewidth = 0.3,
+    #              color="red",
+    #              arrow=arrow(angle=10,
+    #                          length=unit(0.2, "cm"),
+    #                          type="closed")
+    # ) -> med_price_direction_map
   
   price <- states_data$avg_price
   less_than_price <- c()
@@ -253,20 +250,19 @@ for (period in periods) {
           axis.text = element_blank(),
           panel.border = element_blank(),
           panel.grid.major = element_blank(),
-          panel.grid.minor = element_blank()) +
-    geom_point(data=states_data,
-               aes(x=long, y=lat)) +
-    geom_segment(data=allowed_flows,
-                 aes(x=long_i, 
-                     y=lat_i, 
-                     xend=long_j,
-                     yend=lat_j),
-                 linewidth = 0.3,
-                 color="red",
-                 arrow=arrow(angle=10,
-                             length=unit(0.2, "cm"),
-                             type="closed")
-    ) -> avg_price_direction_map
+          panel.grid.minor = element_blank()) -> avg_price_direction_map# +
+    # geom_point(data=states_data,
+    #            aes(x=long, y=lat)) +
+    # geom_segment(data=allowed_flows,
+    #              aes(x=long_i, 
+    #                  y=lat_i, 
+    #                  xend=long_j,
+    #                  yend=lat_j),
+    #              linewidth = 0.3,
+    #              color="red",
+    #              arrow=arrow(angle=10,
+    #                          length=unit(0.2, "cm"),
+    #                          type="closed")) -> avg_price_direction_map
   
   max_seizure_map <- left_join(states %>%
                                  rename(state=state_name) %>% 
@@ -314,14 +310,18 @@ for (period in periods) {
           panel.grid.major = element_blank(),
           panel.grid.minor = element_blank()) -> med_overdose_map_period
   
-  ggsave(paste0("Cocaine Network Optimization/Figs/median price restricted flows (", period[1], "-", period[length(period)], ").png"),
-         med_price_direction_map, scale=1.5)
-  ggsave(paste0("Cocaine Network Optimization/Figs/average price restricted flows (", period[1], "-", period[length(period)], ").png"),
-         avg_price_direction_map, scale=1.5)
+  # ggsave(paste0("Cocaine Network Optimization/Figs/median price restricted flows (", period[1], "-", period[length(period)], ").png"),
+  #        med_price_direction_map, scale=1.5)
+  # ggsave(paste0("Cocaine Network Optimization/Figs/average price restricted flows (", period[1], "-", period[length(period)], ").png"),
+  #        avg_price_direction_map, scale=1.5)
+  ggsave(paste0("Cocaine Network Optimization/Figs/median price (", period[1], "-", period[length(period)], ").png"),
+         med_price_direction_map, width=20, height=10, unit="cm")
+  ggsave(paste0("Cocaine Network Optimization/Figs/average price (", period[1], "-", period[length(period)], ").png"),
+         avg_price_direction_map, width=20, height=10, unit="cm")
   ggsave(paste0("Cocaine Network Optimization/Figs/log max seizure map (", period[1], "-", period[length(period)], ").png"),
-         max_seizure_map_period, scale=1.5)
+         max_seizure_map_period, width=20, height=10, unit="cm")
   ggsave(paste0("Cocaine Network Optimization/Figs/median death map (", period[1], "-", period[length(period)], ").png"),
-         med_overdose_map_period, scale=1.5)
+         med_overdose_map_period, width=20, height=10, unit="cm")
 }
 cocaine_annual_seizures <- cocaine %>%
   filter(MethAcq == "S") %>% 
@@ -359,19 +359,17 @@ cocaine_annual_prices %>% filter(Seize.Year == ex_year) %>% arrange(state) %>% a
 
 ## price direction with t-test
 cocaine_prices <- cocaine %>% 
-  filter(state != "District of Columbia" & !is.na(state) & Seize.Year %in% period & adjusted_price > 0 & Nt.Wt >= 5 & Nt.Wt <= 1000)
+  filter(!is.na(state) & Seize.Year %in% period & adjusted_price > 0 & Nt.Wt >= 5 & Nt.Wt <= 1000)
 
 periods <- list(p1=years1, p2=years2, p3=years3)
 for (period in periods) {
   price_period <- cocaine %>%
-    filter(state != "District of Columbia") %>% 
     filter(!is.na(state) & Seize.Year %in% period & adjusted_price > 0 & Nt.Wt >= 5 & Nt.Wt <= 1000) %>%
     group_by(state) %>% 
     summarise(avg_price=mean(adjusted_price, na.rm=T),
               med_price=median(adjusted_price, na.rm=T))
   
   seizure_period <- cocaine %>%
-    filter(state != "District of Columbia") %>% 
     filter(!is.na(state) & Seize.Year %in% period) %>%
     group_by(state) %>% 
     summarise(max_weight=max(Nt.Wt, na.rm=T),
@@ -389,7 +387,7 @@ for (period in periods) {
     arrange(state) %>% 
     right_join(states %>% 
                  rename(state=state_name) %>% 
-                 filter(!(state %in% c("Alaska", "District of Columbia", "Hawaii"))) %>% 
+                 filter(!(state %in% c("Alaska", "Hawaii"))) %>% 
                  group_by(state) %>% 
                  summarise(long=mean(long), lat=mean(lat)), by="state") %>% 
     mutate(states_index=1:length(state))
@@ -508,7 +506,6 @@ for (period in periods) {
 periods <- list(p1=years1, p2=years2, p3=years3)
 for (period in periods) {
   purity_period <- cocaine %>%
-    filter(state != "District of Columbia") %>% 
     filter(!is.na(state) & Seize.Year %in% period & adjusted_price > 0 & Nt.Wt >= 5 & Nt.Wt <= 1000) %>%
     group_by(state) %>% 
     summarise(avg_purity=mean(Potency, na.rm=T),
@@ -559,5 +556,21 @@ for (period in periods) {
           panel.grid.minor = element_blank()) -> med_purity_map
   
   ggsave(paste0("Cocaine Network Optimization/Figs/median purity map (", period[1], "-", period[length(period)], ").png"),
-         med_purity_map, scale=1.5)
+         med_purity_map, width=20, height=10, unit="cm")
 }
+
+
+cocaine_2009_2014 <- cocaine %>% filter(Seize.Year %in% years3)
+cocaine_2009_2014$state %>% unique %>% sort
+overdose$state %>% unique %>% sort
+
+cocaine_2009_2014 %>% filter(state == "District of Columbia")
+overdose %>% filter(state == "District of Columbia" & year %in% years3)
+states_data$state
+
+cocaine_2009_2014 %>%
+  filter(adjusted_price > 0 & Nt.Wt >= 5 & Nt.Wt <= 1000) %>% 
+  group_by(state) %>% 
+  summarise(avg_purity=mean(Potency, na.rm=T),
+            med_purity=median(Potency, na.rm=T),
+            sd_purity=sd(Potency, na.rm=T)) %>% view

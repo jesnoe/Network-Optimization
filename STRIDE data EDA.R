@@ -34,6 +34,7 @@ library(lubridate)
            MethAcq=as.factor(MethAcq),
            Drug=as.factor(Drug),
            Potency=ifelse(Potency > 100, Potency/10, Potency),
+           # Potency=ifelse(Potency > 0 & Potency < 1, Potency*100, Potency),
            Seize.Year=as.numeric(Seize.Year),
            Seize.Month=as.numeric(Seize.Month),
            adjusted_price=Post.Price/(Nt.Wt*Potency/100)) %>% 
@@ -48,7 +49,7 @@ library(lubridate)
     rename(state=state_name) %>% 
     relocate(state)
   
-  overdose <- read.csv("Cocaine Network Optimization/Overdose Deaths 1999-2016.csv") %>% as_tibble
+  overdose <- read_xlsx("Cocaine Network Optimization/Overdose deaths X42, X62, Y12 1999-2016.xlsx")
   VSRR <- read.csv("Cocaine Network Optimization/VSRR_Provisional_Drug_Overdose_Death_Counts (2015-2023).csv") %>%
     as_tibble %>% 
     mutate(state=State,
@@ -86,12 +87,30 @@ find_state_index <- Vectorize(find_state_index)
 
 # no D.C. data
 period <- years3
+period <- years2
 price_period <- cocaine %>%
   filter(state != "District of Columbia") %>% 
   filter(!is.na(state) & Seize.Year %in% period & adjusted_price > 0 & Nt.Wt >= 5 & Nt.Wt <= 1000) %>%
   group_by(state) %>% 
   summarise(avg_price=mean(adjusted_price, na.rm=T),
-            med_price=median(adjusted_price, na.rm=T))
+            med_price=median(adjusted_price, na.rm=T),
+            sd_price=sd(adjusted_price, na.rm=T))
+
+cocaine_purity_corrected <- cocaine %>%
+  mutate(Potency=ifelse(Potency > 0 & Potency < 1, Potency*100, Potency),
+         adjusted_price=Post.Price/(Nt.Wt*Potency/100)) %>% 
+  mutate(adjusted_price=ifelse(Potency == 0, NA, adjusted_price))
+
+cocaine %>% filter(Potency > 0 & Potency < 1) # only 19 cases in 2000~2013
+cocaine_purity_corrected[which(cocaine$Potency > 0 & cocaine$Potency < 1),]
+
+price_period_purity_corrected <- cocaine_purity_corrected %>%
+  filter(state != "District of Columbia") %>% 
+  filter(!is.na(state) & Seize.Year %in% period & adjusted_price > 0 & Nt.Wt >= 5 & Nt.Wt <= 1000) %>%
+  group_by(state) %>% 
+  summarise(avg_price=mean(adjusted_price, na.rm=T),
+            med_price=median(adjusted_price, na.rm=T),
+            sd_price=sd(adjusted_price, na.rm=T))
 
 seizure_period <- cocaine %>%
   filter(state != "District of Columbia") %>% 

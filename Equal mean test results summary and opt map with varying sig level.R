@@ -30,6 +30,8 @@ cocaine <- stride %>%
   mutate(state=as.factor(State),
          MethAcq=as.factor(MethAcq),
          Drug=as.factor(Drug),
+         Potency=ifelse(Potency > 100, Potency/10, Potency),
+         Potency=ifelse(Potency > 0 & Potency < 1, Potency*100, Potency),
          Seize.Year=as.numeric(Seize.Year),
          Seize.Month=as.numeric(Seize.Month),
          adjusted_price=Post.Price/(Nt.Wt*Potency/100)) %>% 
@@ -45,7 +47,7 @@ cocaine <- stride %>%
   relocate(state)
 
 
-overdose <- read.csv("Cocaine Network Optimization/Overdose Deaths 1999-2016.csv") %>% as_tibble
+overdose <- read_xlsx("Cocaine Network Optimization/Overdose deaths X42, X62, Y12 1999-2016.xlsx")
 VSRR <- read.csv("Cocaine Network Optimization/VSRR_Provisional_Drug_Overdose_Death_Counts (2015-2023).csv") %>%
   as_tibble %>% 
   mutate(state=State,
