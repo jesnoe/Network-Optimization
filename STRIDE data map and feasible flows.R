@@ -47,7 +47,7 @@ cocaine <- stride %>%
   rename(state=state_name) %>% 
   relocate(state)
 
-overdose <- read_xlsx("Cocaine Network Optimization/Overdose deaths T40.4 T40.5 1999-2016.xlsx") %>% as_tibble
+overdose <- read_xlsx("Cocaine Network Optimization/Overdose deaths T40.4 or T40.5 1999-2016.xlsx") %>% as_tibble
 VSRR <- read.csv("Cocaine Network Optimization/VSRR_Provisional_Drug_Overdose_Death_Counts (2015-2023).csv") %>%
   as_tibble %>% 
   mutate(state=State,
@@ -179,12 +179,12 @@ for (period in periods) {
     geom_polygon(aes(x=long,
                      y=lat,
                      group=group,
-                     fill=med_price),
+                     fill=ifelse(is.na(med_price), 73, med_price)),
                  color="black") +
     scale_fill_viridis_c(na.value="white") +
     expand_limits(x=allowed_flows_map$long, y=allowed_flows_map$lat) +
     coord_quickmap() +
-    labs(x="", y="") +
+    labs(x="", y="", fill="") +
     theme_bw() + 
     theme(axis.ticks = element_blank(),
           axis.line =  element_blank(),
@@ -278,7 +278,7 @@ for (period in periods) {
     scale_fill_viridis_c(na.value="white") +
     expand_limits(x=allowed_flows_map$long, y=allowed_flows_map$lat) +
     coord_quickmap() +
-    labs(x="", y="", fill="Log max seizures") +
+    labs(x="", y="", fill="") +
     theme_bw() + 
     theme(axis.ticks = element_blank(),
           axis.line =  element_blank(),
@@ -301,7 +301,7 @@ for (period in periods) {
     scale_fill_viridis_c(na.value="white") +
     expand_limits(x=allowed_flows_map$long, y=allowed_flows_map$lat) +
     coord_quickmap() +
-    labs(x="", y="", fill="Median deaths") +
+    labs(x="", y="", fill="") +
     theme_bw() + 
     theme(axis.ticks = element_blank(),
           axis.line =  element_blank(),
@@ -560,13 +560,18 @@ for (period in periods) {
 }
 
 
-cocaine_2009_2014 <- cocaine %>% filter(Seize.Year %in% years3)
+cocaine_2009_2014 <- cocaine %>% filter(Seize.Year %in% years3 & Nt.Wt >= 5 & Nt.Wt <= 1000)
+cocaine_2009_2014 %>% filter(state == "North Dakota") %>% print(n=50)
+cocaine_2009_2014 %>% summary
+cocaine_2009_2014 %>% filter(!is.na(Post.Price) & is.na(adjusted_price))
 cocaine_2009_2014$state %>% unique %>% sort
 overdose$state %>% unique %>% sort
+overdose %>% filter(year %in% years3 & !(state %in% c("Alaska", "Hawaii"))) %>% 
+  select(-population) %>% 
+  pivot_wider(names_from = year,
+              values_from = deaths) %>% print(n=49) -> overdose_2009_2014
 
-cocaine_2009_2014 %>% filter(state == "District of Columbia")
-overdose %>% filter(state == "District of Columbia" & year %in% years3)
-states_data$state
+overdose_2009_2014[,-1] %>% apply(2, function(x) sum(x, na.rm=T))
 
 cocaine_2009_2014 %>%
   filter(adjusted_price > 0 & Nt.Wt >= 5 & Nt.Wt <= 1000) %>% 

@@ -51,7 +51,7 @@ cocaine <- stride %>%
   relocate(state)
 
 
-overdose <- read_xlsx("Cocaine Network Optimization/Overdose deaths T40.4 T40.5 1999-2016.xlsx")
+overdose <- read_xlsx("Cocaine Network Optimization/Overdose deaths T40.5 1999-2016.xlsx")
 VSRR <- read.csv("Cocaine Network Optimization/VSRR_Provisional_Drug_Overdose_Death_Counts (2015-2023).csv") %>%
   as_tibble %>% 
   mutate(state=State,
@@ -100,6 +100,8 @@ seizure_period <- cocaine %>%
   group_by(state) %>% 
   summarise(max_weight=max(Nt.Wt, na.rm=T),
             max_cocaine_weight=max(Nt.Wt*Potency/100, na.rm=T))
+
+names(overdose)[3] <- "deaths"
 
 overdose_period <- overdose %>% 
   filter(!is.na(state) & year %in% period) %>%
@@ -218,7 +220,10 @@ alpha_t_test <- 0.25
     dot_index <- which(strsplit(var, "")[[1]] == ".") - 1
     source_index <- substr(var, 2, comma_index - 1) %>% as.numeric
     destination_index <- substr(var, comma_index + 1, dot_index) %>% as.numeric
-    if (is.na(price[destination_index]) | is.na(price[source_index])) next
+    if (is.na(price[destination_index]) | is.na(price[source_index])) {
+      relaxed_pairs_index <- rbind(relaxed_pairs_index, c(source_index, destination_index))
+      next
+    }
     if (source_index %in% t_test_summary$state_index & destination_index %in% t_test_summary$bordering_state_index) {
       if (t_test_summary %>%
           filter(state_index==source_index & bordering_state_index == destination_index) %>%
@@ -238,7 +243,7 @@ alpha_t_test <- 0.25
   # Source indicator
   A3 <- matrix(0, 2*N, n_d_vars)
   for (i in 1:N) {
-    A3[i, which(d_vars %in% c(paste0("S", i), paste0("x", i)))] <- c(1/min(b1), -1)
+    A3[i, which(d_vars %in% c(paste0("S", i), paste0("x", i)))] <- c(1/min(b1[b1>0]), -1)
     A3[i+N, which(d_vars %in% c(paste0("S", i), paste0("x", i)))] <- c(-0.01, 1)
   }
   b3 <- rep(0, 2*N)
@@ -250,7 +255,7 @@ alpha_t_test <- 0.25
 
 
 
-
+n_relaxed_pairs <- nrow(relaxed_pairs_index)
 for (alpha_i in seq(1, 0, by=-0.1)) {
   for (epsilon_si in seq(0, 1, by=.1)) {
     model_epsilon_s <- list()
@@ -262,8 +267,8 @@ for (alpha_i in seq(1, 0, by=-0.1)) {
     model_epsilon_s$sense[nrow(model_epsilon_s$A)] <- "="
     model_epsilon_s$vtype      <- c(rep("C", length(model_epsilon_s$obj) - N), rep("B", N)) # Continuous and binary
     model_epsilon_s$rhs        <- c(b1, epsilon_si*b2_ratio, b3, b_source_limit)
-    model_epsilon_s$sos <- vector(mode="list", length=nrow(relaxed_pairs_index))
-    for (j in 1:nrow(relaxed_pairs_index)) {
+    model_epsilon_s$sos <- vector(mode="list", length=n_relaxed_pairs+3)
+    for (j in 1:n_relaxed_pairs) {
       model_epsilon_s$sos[[j]]$type <- 1
       model_epsilon_s$sos[[j]]$index <- which(d_vars[-zero_d_vars_index] %in% c(paste0("w",
                                                                                        relaxed_pairs_index$source_index[j],
@@ -277,8 +282,17 @@ for (alpha_i in seq(1, 0, by=-0.1)) {
                                                                                        ".")
       )
       )
-      model_epsilon_s$sos[[j]]$weight <- c(1,1)
+      model_epsilon_s$sos[[j]]$weight <- 1:2
     }
+    model_epsilon_s$sos[[n_relaxed_pairs+1]]$type <- 2
+    model_epsilon_s$sos[[n_relaxed_pairs+1]]$index <- which(d_vars[-zero_d_vars_index] %in% c("w4,36.", "w36,27.", "w27,4."))
+    model_epsilon_s$sos[[n_relaxed_pairs+1]]$weight <- 1:3
+    model_epsilon_s$sos[[n_relaxed_pairs+2]]$type <- 2
+    model_epsilon_s$sos[[n_relaxed_pairs+2]]$index <- which(d_vars[-zero_d_vars_index] %in% c("w4,27.", "w27,36.", "w36,4."))
+    model_epsilon_s$sos[[n_relaxed_pairs+2]]$weight <- 1:3
+    model_epsilon_s$sos[[n_relaxed_pairs+3]]$type <- 2
+    model_epsilon_s$sos[[n_relaxed_pairs+3]]$index <- which(d_vars[-zero_d_vars_index] %in% c("w9,1.", "w1,10.", "w10,9."))
+    model_epsilon_s$sos[[n_relaxed_pairs+3]]$weight <- 1:3
     result_epsilon_s_sum       <- gurobi(model_epsilon_s, list(Method=-1))
     
     opt_val_i <- round(result_epsilon_s_sum$objval, 2)
@@ -322,7 +336,7 @@ for (alpha_i in seq(1, 0, by=-0.1)) {
       scale_fill_viridis_c(na.value="white") +
       expand_limits(x=overdose_map_year$long, y=overdose_map_year$lat) +
       coord_quickmap() +
-      labs(x="", y="", title=bquote(paste(epsilon[s], "=", .(epsilon_si), ", ", alpha, "=", .(alpha_i), ", opt_val=", .(opt_val_i)) )) +
+      labs(x="", y="", fill="") +#title=bquote(paste(epsilon[s], "=", .(epsilon_si), ", ", alpha, "=", .(alpha_i), ", opt_val=", .(opt_val_i)) )) +
       theme_bw() + 
       theme(axis.ticks = element_blank(),
             axis.line =  element_blank(),
@@ -337,6 +351,7 @@ for (alpha_i in seq(1, 0, by=-0.1)) {
                        y=lat_i, 
                        xend=long_j,
                        yend=lat_j),
+                   color="grey60",
                    linewidth = 0.2+2*opt_sol$optimal_sols[result_flow_index]/max_flow,
                    arrow=arrow(angle=10,
                                length=unit(0.3, "cm"),
