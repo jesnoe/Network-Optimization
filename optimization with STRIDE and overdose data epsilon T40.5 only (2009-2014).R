@@ -103,8 +103,8 @@ seizure_period <- cocaine %>%
   summarise(max_weight=max(Nt.Wt, na.rm=T),
             max_cocaine_weight=max(Nt.Wt*Potency/100, na.rm=T))
 
-names(overdose)[3] <- "deaths"
 
+names(overdose)[3] <- "deaths"
 overdose_period <- overdose %>% 
   filter(!is.na(state) & year %in% period) %>%
   group_by(state) %>% 
@@ -227,101 +227,6 @@ for (alpha in seq(1, 0, by=-0.1)) {
 names(alpha_results) <- c("alpha", "feasibility", "n_opt_sols")
 alpha_results
 
-epsilon_s <- 0.48
-for (alpha in seq(0, 1, by=0.2)) {
-  model_alpha <- list()
-  model_alpha$obj        <- c(rep(1-alpha, n_d_vars - n_zero_d_vars - 2*N), rep(0, N), rep(alpha, N))
-  model_alpha$modelsense <- "min"
-  model_alpha$A          <- rbind(A1[,-zero_d_vars_index], A2[,-zero_d_vars_index], A3[,-zero_d_vars_index], A_source_limit[,-zero_d_vars_index])
-  model_alpha$sense      <- rep(">", nrow(model_alpha$A))
-  model_alpha$sense[1:N] <- "="
-  model_alpha$sense[nrow(model_alpha$A)] <- "="
-  model_alpha$vtype      <- c(rep("C", length(model_alpha$obj) - N), rep("B", N)) # Continuous and binary
-  model_alpha$rhs        <- c(b1, epsilon_s*b2_ratio, b3, b_source_limit)
-  result_alpha_sum       <- gurobi(model_alpha, list(Method=-1))
-  opt_val_i <- round(result_alpha_sum$objval, 2)
-    
-  opt_sol <- data.frame(deicision_vars=d_vars[-zero_d_vars_index], optimal_sols=result_alpha_sum$pool[[1]]$xn) %>%
-    filter(optimal_sols > 0 & !grepl("x", deicision_vars))
-  result_flow_index <- grep("w", opt_sol$deicision_vars)
-  result_source_index <- grep("S", opt_sol$deicision_vars)
-  max_flow <- max(opt_sol$optimal_sols[result_flow_index])
-  
-  opt_sol %>% write.csv(paste0("Cocaine Network Optimization/Results/optimal solution ",
-                                     period[1], "-", period[length(period)],
-                                     " (alpha=",
-                                     alpha,
-                                     ", epsilton_s=",
-                                     epsilon_s,
-                                     ", z=",
-                                     opt_val_i,
-                                     ").csv"),
-                        row.names=F)
-  
-  opt_sol <- cbind(opt_sol, find_state_index(opt_sol$deicision_vars) %>% t) %>% 
-    rename(i="1", j="2")
-  
-  opt_sol$long_i <- states_data$long[opt_sol$i]
-  opt_sol$lat_i <- states_data$lat[opt_sol$i]
-  opt_sol$long_j <- states_data$long[opt_sol$j]
-  opt_sol$lat_j <- states_data$lat[opt_sol$j]
-  
-  
-  overdose_map_year <- left_join(states %>%
-                                   rename(state=state_name) %>% 
-                                   filter(!(state %in% c("Alaska", "Hawaii"))),
-                                 states_data %>% select(state, med_death),
-                                 by="state")
-  overdose_map_year %>% ggplot() +
-    geom_polygon(aes(x=long,
-                     y=lat,
-                     group=group,
-                     fill=med_death),
-                 color="black") +
-    scale_fill_viridis_c(na.value="white") +
-    expand_limits(x=overdose_map_year$long, y=overdose_map_year$lat) +
-    coord_quickmap() +
-    labs(x="", y="") +
-    theme_bw() + 
-    theme(axis.ticks = element_blank(),
-          axis.line =  element_blank(),
-          axis.text = element_blank(),
-          panel.border = element_blank(),
-          panel.grid.major = element_blank(),
-          panel.grid.minor = element_blank()) +
-    geom_point(data=states_data,
-               aes(x=long, y=lat)) +
-    geom_segment(data=opt_sol[result_flow_index,],
-                 aes(x=long_i, 
-                     y=lat_i, 
-                     xend=long_j,
-                     yend=lat_j),
-                 linewidth = 0.2+2*opt_sol$optimal_sols[result_flow_index]/max_flow,
-                 arrow=arrow(angle=10,
-                             length=unit(0.3, "cm"),
-                             type="closed")
-    ) +
-    geom_text(data=opt_sol[result_source_index,],
-              aes(x=long_i, y=lat_i),
-              label=opt_sol[result_source_index,]$optimal_sols %>% round(1),
-              color="red",
-              nudge_x = c(0.1, 0), nudge_y = c(-0.5, 0)) +
-    geom_text(data=opt_sol[result_source_index,],
-              aes(x=long_i, y=lat_i),
-              label=opt_sol[result_source_index,]$optimal_sols %>% round(1),
-              color="red",
-              nudge_x = c(0.1, 0), nudge_y = c(-0.5, 0)) -> optimal_network_map
-  ggsave(paste0("Cocaine Network Optimization/Results/optimal networks ",
-                period[1], "-", period[length(period)],
-                " (alpha=",
-                alpha,
-                ", epsilton_s=",
-                epsilon_s,
-                ", z=",
-                opt_val_i,
-                ").png"),
-         optimal_network_map, width=20, height=10, unit="cm")
-}
 
 for (alpha in seq(0.99, 0.91, by=-0.01)) {
   model_alpha <- list()
