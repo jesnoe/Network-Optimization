@@ -157,7 +157,8 @@ for (i in 1:49) {
   }
 }
 t_test_summary
-# write.csv(t_test_summary, paste0("Cocaine Network Optimization/t_test_summary (", period[1], "-", period[length(period)], ").csv"), row.names=F)
+# write.csv(t_test_summary %>% filter(state_index < bordering_state_index),
+#           paste0("Cocaine Network Optimization/t_test_summary (", period[1], "-", period[length(period)], ").csv"), row.names=F)
 t_test_summary %>% filter(p_value > 0.5)
 
 
