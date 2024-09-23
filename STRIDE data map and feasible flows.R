@@ -465,7 +465,7 @@ for (period in periods) {
                      xend=long_j,
                      yend=lat_j),
                  linewidth = 0.3,
-                 color="red",
+                 color="grey60",
                  arrow=arrow(angle=10,
                              length=unit(0.2, "cm"),
                              type="closed")

@@ -125,12 +125,12 @@ overdose_period <- overdose %>%
 states_data <- full_join(price_period, seizure_period, by="state") %>%
   full_join(purity_period, by="state") %>% 
   left_join(overdose_period, by="state") %>% 
-  arrange(state) %>% 
   right_join(states %>% 
                rename(state=state_name) %>% 
                filter(!(state %in% c("Alaska", "Hawaii"))) %>% 
                group_by(state) %>% 
                summarise(long=mean(long), lat=mean(lat)), by="state") %>% 
+  arrange(state) %>% 
   mutate(states_index=1:length(state))
 
 states_data$med_deaths_T40.5 <- ifelse(is.na(states_data$med_deaths_T40.5), 0, states_data$med_deaths_T40.5)

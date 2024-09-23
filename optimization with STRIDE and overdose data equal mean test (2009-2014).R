@@ -126,7 +126,7 @@ states_data$max_weight <- ifelse(is.na(states_data$max_weight), 0, states_data$m
 
 
 cocaine_prices <- cocaine %>% 
-  filter(!is.na(state) & Seize.Year %in% period & adjusted_price > 0 & Nt.Wt >= 5 & Nt.Wt <= 1000)
+  filter(!is.na(state) & Seize.Year %in% c(years2, years3) & adjusted_price > 0 & Nt.Wt >= 5 & Nt.Wt <= 1000)
 
 t_test_summary <- tibble()
 for (i in 1:49) {
@@ -134,14 +134,14 @@ for (i in 1:49) {
   bordering_states <- neighbor[[state_i]]
   
   state_prices <- cocaine_prices %>% 
-    filter(Seize.Year %in% period & state == state_i) %>% 
+    filter(state == state_i) %>% 
     pull(adjusted_price)
   
   if (length(state_prices) < 3) next
   
   for(bordering_state in bordering_states) {
     bordering_state_prices <- cocaine_prices %>% 
-      filter(Seize.Year %in% period & state == bordering_state) %>% 
+      filter(state == bordering_state) %>% 
       pull(adjusted_price)
     
     if (length(bordering_state_prices) < 3) next
@@ -158,7 +158,7 @@ for (i in 1:49) {
 }
 t_test_summary
 # write.csv(t_test_summary %>% filter(state_index < bordering_state_index),
-#           paste0("Cocaine Network Optimization/t_test_summary (", period[1], "-", period[length(period)], ").csv"), row.names=F)
+#           paste0("Cocaine Network Optimization/price t_test_summary (", period[1], "-", period[length(period)], ").csv"), row.names=F)
 t_test_summary %>% filter(p_value > 0.5)
 
 
