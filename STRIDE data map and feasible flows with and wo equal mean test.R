@@ -1,17 +1,19 @@
 # setwd("/Users/R")
-# setwd("C:/Users/gkfrj/Documents/R")
+# setwd("C:/Users/Users/Documents/R")
 library(readxl)
 library(gurobi)
 library(stringi)
-library(urbnmapr)
+library(urbnmapr) # install by running -> devtools::install_github("UrbanInstitute/urbnmapr")
 library(tidyverse)
 library(gridExtra)
 library(lubridate)
+# Put "Cocaine Network Optimization" folder in your working directory
+
 # may need this for projected figures
 # coordinate.HIDTA <- left_join(counties_sf, HIDTA.dist, by=c("state_name", "county_name")) %>% filter(!(state_name %in% c("Alaska", "Hawaii", "Puerto Rico")))
 # names(coordinate.HIDTA)[1] <- "GEOID"
 {
-  stride <- read.csv("STRIDE_Raw.csv") %>% as_tibble %>% filter(!is.na(Seize.Year) & !is.na(Seize.Month) & !(State %in% c("AK", "HI")))
+  stride <- read.csv("Cocaine Network Optimization/STRIDE_Raw.csv") %>% as_tibble %>% filter(!is.na(Seize.Year) & !is.na(Seize.Month) & !(State %in% c("AK", "HI")))
   stride$Nt.Wt <- as.numeric(stride$Nt.Wt)
   stride$Potency <- as.numeric(stride$Potency)
   stride$Post.Price <- as.numeric(stride$Post.Price)

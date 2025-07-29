@@ -303,8 +303,9 @@ for (alpha in seq(0.99, 0.91, by=-0.01)) {
 
 
 # epsilon_seizure test
-alpha <- 1
-epsilon_s <- .46
+alpha_i <- 0.9
+epsilon_si <- 0.44
+opt_val_i <- 18.96
 epsilon_s_results <- data.frame()
 for (epsilon_s in seq(0, 1, by=0.02)) {
   model_epsilon_s <- list()
@@ -341,10 +342,10 @@ for (alpha_i in seq(1, 0, by=-.1)) {
     
     opt_val_i <- round(result_epsilon_s_sum$objval, 2)
     
-    opt_sol <- data.frame(deicision_vars=d_vars[-zero_d_vars_index], optimal_sols=result_epsilon_s_sum$pool[[1]]$xn) %>%
-      filter(optimal_sols > 0 & !grepl("x", deicision_vars))
-    result_flow_index <- grep("w", opt_sol$deicision_vars)
-    result_source_index <- grep("S", opt_sol$deicision_vars)
+    opt_sol <- data.frame(decision_vars=d_vars[-zero_d_vars_index], optimal_sols=result_epsilon_s_sum$pool[[1]]$xn) %>%
+      filter(optimal_sols > 0 & !grepl("x", decision_vars))
+    result_flow_index <- grep("w", opt_sol$decision_vars)
+    result_source_index <- grep("S", opt_sol$decision_vars)
     max_flow <- max(opt_sol$optimal_sols[result_flow_index])
     
     opt_sol %>% write.csv(paste0("Cocaine Network Optimization/Results/optimal solution ",
@@ -358,29 +359,44 @@ for (alpha_i in seq(1, 0, by=-.1)) {
                                  ").csv"),
                           row.names=F)
     
-    opt_sol <- cbind(opt_sol, find_state_index(opt_sol$deicision_vars) %>% t) %>% 
+    # opt_sol <- read.csv("Cocaine Network Optimization/Results with Overdose deaths T40.5 1999-2016/optimal solution 2009-2014 (alpha=0.9, epsilton_s=0.44, z=18.96).csv") %>%
+    #   rename(decision_vars = deicision_vars)
+    # result_flow_index <- grep("w", opt_sol$decision_vars)
+    # result_source_index <- grep("S", opt_sol$decision_vars)
+    # max_flow <- max(opt_sol$optimal_sols[result_flow_index])
+    opt_sol <- cbind(opt_sol, find_state_index(opt_sol$decision_vars) %>% t) %>% 
       rename(i="1", j="2")
     
-    opt_sol$long_i <- states_data$long[opt_sol$i]
-    opt_sol$lat_i <- states_data$lat[opt_sol$i]
-    opt_sol$long_j <- states_data$long[opt_sol$j]
-    opt_sol$lat_j <- states_data$lat[opt_sol$j]
-    
+    states <- get_urbn_map(map = "states", sf = TRUE)
     overdose_map_year <- left_join(states %>%
                                      rename(state=state_name) %>% 
-                                     filter(!(state %in% c("Alaska", "Hawaii"))),
-                                   states_data %>% select(state, med_death),
-                                   by="state")
+                                     filter(!(state %in% c("Alaska", "Hawaii"))) %>% 
+                                     mutate(centroid = st_centroid(geometry)),
+                                   states_data %>% select(state, med_death, states_index),
+                                   by="state") %>% 
+      arrange(states_index)
+    
+    overdose_map_year_coords <- st_coordinates(overdose_map_year$centroid)
+    opt_sol$long_i <- overdose_map_year_coords[,1][opt_sol$i]
+    opt_sol$lat_i <- overdose_map_year_coords[,2][opt_sol$i]
+    opt_sol$long_j <- overdose_map_year_coords[,1][opt_sol$j]
+    opt_sol$lat_j <- overdose_map_year_coords[,2][opt_sol$j]
+    
+    opt_sol_Si <- opt_sol %>% filter(grepl("S", decision_vars)) %>% rename(states_index = i)
+    opt_sol_Si_sf <- left_join(overdose_map_year %>% filter(states_index %in% opt_sol_Si$states_index), opt_sol_Si %>% select(states_index, optimal_sols), by="states_index")
+    
     overdose_map_year %>% ggplot() +
-      geom_polygon(aes(x=long,
-                       y=lat,
-                       group=group,
-                       fill=med_death),
-                   color="black") +
+      geom_sf(aes(fill = med_death),
+              color="black") +
+      # geom_polygon(aes(x=long,
+      #                  y=lat,
+      #                  group=group,
+      #                  fill=med_death),
+      #              color="black") +
       scale_fill_viridis_c(na.value="white") +
       expand_limits(x=overdose_map_year$long, y=overdose_map_year$lat) +
-      coord_quickmap() +
-      labs(x="", y="", fill="", title="") +#title=bquote(paste(epsilon[s], "=", .(epsilon_si), ", ", alpha, "=", .(alpha_i), ", opt_val=", .(opt_val_i)) )) +
+      # coord_quickmap() +
+      labs(x="", y="", fill="") +#title=bquote(paste(epsilon[s], "=", .(epsilon_si), ", ", alpha, "=", .(alpha_i), ", opt_val=", .(opt_val_i)) )) +
       theme_bw() + 
       theme(axis.ticks = element_blank(),
             axis.line =  element_blank(),
@@ -388,9 +404,7 @@ for (alpha_i in seq(1, 0, by=-.1)) {
             panel.border = element_blank(),
             panel.grid.major = element_blank(),
             panel.grid.minor = element_blank()) +
-      geom_point(data=states_data,
-                 aes(x=long, y=lat),
-                 size=0.5) +
+      geom_sf(data = overdose_map_year$centroid, color = "black", size = 2) +
       geom_segment(data=opt_sol[result_flow_index,],
                    aes(x=long_i, 
                        y=lat_i, 
@@ -402,12 +416,8 @@ for (alpha_i in seq(1, 0, by=-.1)) {
                                length=unit(0.3, "cm"),
                                type="closed")
       ) +
-      geom_text(data=opt_sol[result_source_index,],
-                aes(x=long_i, y=lat_i),
-                label=opt_sol[result_source_index,]$optimal_sols %>% round(1),
-                color="red",
-                nudge_x = c(0.1, 0), nudge_y = c(-0.5, 0)) -> optimal_network_map
-    ggsave(paste0("Cocaine Network Optimization/Results/optimal networks ",
+      geom_sf_text(data = opt_sol_Si_sf, aes(label=round(optimal_sols, 1)), color = "red", size =3) -> optimal_network_map
+    ggsave(paste0("Cocaine Network Optimization/Results/optimal networks epsilton_s ",
                   period[1], "-", period[length(period)],
                   " (alpha=",
                   alpha_i,
@@ -416,6 +426,6 @@ for (alpha_i in seq(1, 0, by=-.1)) {
                   ", z=",
                   opt_val_i,
                   ").png"),
-           optimal_network_map, width=20, height=10, unit="cm")
+           optimal_network_map, scale=1)#width=20, height=10, unit="cm")
   }
 }

@@ -1,15 +1,15 @@
 # setwd("/Users/R")
-# setwd("C:/Users/gkfrj/Documents/R")
+# setwd("C:/Users/Users/Documents/R")
 library(readxl)
-library(gurobi)
 library(stringi)
-library(urbnmapr)
+library(urbnmapr) # install by running -> devtools::install_github("UrbanInstitute/urbnmapr")
 library(tidyverse)
 library(gridExtra)
 library(lubridate)
 
+# Put "Cocaine Network Optimization" folder in your working directory
 {
-  stride <- read.csv("STRIDE_Raw.csv") %>% as_tibble %>% filter(!is.na(Seize.Year) & !is.na(Seize.Month) & !(State %in% c("AK", "HI")))
+  stride <- read.csv("Cocaine Network Optimization/STRIDE_Raw.csv") %>% as_tibble %>% filter(!is.na(Seize.Year) & !is.na(Seize.Month) & !(State %in% c("AK", "HI")))
   stride$Nt.Wt <- as.numeric(stride$Nt.Wt)
   stride$Potency <- as.numeric(stride$Potency)
   stride$Post.Price <- as.numeric(stride$Post.Price)
