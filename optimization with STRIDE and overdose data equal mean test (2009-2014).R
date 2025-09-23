@@ -1,6 +1,8 @@
+# install.packages("C:/gurobi1203/win64/R/gurobi_12.0-3.zip")
 # setwd("/Users/R")
 # setwd("C:/Users/User/Documents/R")
 library(readxl)
+library(slam)
 library(gurobi) # need a license. Refer to https://cran.r-project.org/web/packages/prioritizr/vignettes/gurobi_installation_guide.html
 library(stringi)
 library(urbnmapr) # install by running -> devtools::install_github("UrbanInstitute/urbnmapr")
@@ -74,6 +76,7 @@ VSRR_cocaine <- VSRR %>%
 years1 <- 2000:2003
 years2 <- 2004:2008
 years3 <- 2009:2014
+t_test_summary <- read.csv("Cocaine Network Optimization/price t_test_summary (2009-2014).csv")
 }
 
 find_state_index <- function(d_var) {
@@ -89,7 +92,7 @@ find_state_index <- function(d_var) {
 }
 find_state_index <- Vectorize(find_state_index)
 
-# no D.C. data
+# no D.C. data (? data has D.C. data)
 period <- years3
 price_period <- cocaine %>%
   filter(!is.na(state) & Seize.Year %in% period & adjusted_price > 0 & Nt.Wt >= 5 & Nt.Wt <= 1000) %>%
@@ -130,38 +133,38 @@ states_data$max_weight <- ifelse(is.na(states_data$max_weight), 0, states_data$m
 cocaine_prices <- cocaine %>% 
   filter(!is.na(state) & Seize.Year %in% c(years2, years3) & adjusted_price > 0 & Nt.Wt >= 5 & Nt.Wt <= 1000)
 
-t_test_summary <- tibble()
-for (i in 1:49) {
-  state_i <- states_data$state[i]
-  bordering_states <- neighbor[[state_i]]
-  
-  state_prices <- cocaine_prices %>% 
-    filter(state == state_i) %>% 
-    pull(adjusted_price)
-  
-  if (length(state_prices) < 3) next
-  
-  for(bordering_state in bordering_states) {
-    bordering_state_prices <- cocaine_prices %>% 
-      filter(state == bordering_state) %>% 
-      pull(adjusted_price)
-    
-    if (length(bordering_state_prices) < 3) next
-    price_t_test <- t.test(state_prices, bordering_state_prices)
-    t_test_summary <- rbind(t_test_summary,
-                            tibble(state_index=i,
-                                   bordering_state_index=states_data$states_index[which(states_data$state == bordering_state)],
-                                   state=state_i,
-                                   bordering_state=bordering_state,
-                                   mean_state=price_t_test$estimate[1],
-                                   mean_bordering_state=price_t_test$estimate[2],
-                                   p_value=price_t_test$p.value))
-  }
-}
-t_test_summary
+# t_test_summary <- tibble()
+# for (i in 1:49) {
+#   state_i <- states_data$state[i]
+#   bordering_states <- neighbor[[state_i]]
+#   
+#   state_prices <- cocaine_prices %>% 
+#     filter(state == state_i) %>% 
+#     pull(adjusted_price)
+#   
+#   if (length(state_prices) < 3) next
+#   
+#   for(bordering_state in bordering_states) {
+#     bordering_state_prices <- cocaine_prices %>% 
+#       filter(state == bordering_state) %>% 
+#       pull(adjusted_price)
+#     
+#     if (length(bordering_state_prices) < 3) next
+#     price_t_test <- t.test(state_prices, bordering_state_prices)
+#     t_test_summary <- rbind(t_test_summary,
+#                             tibble(state_index=i,
+#                                    bordering_state_index=states_data$states_index[which(states_data$state == bordering_state)],
+#                                    state=state_i,
+#                                    bordering_state=bordering_state,
+#                                    mean_state=price_t_test$estimate[1],
+#                                    mean_bordering_state=price_t_test$estimate[2],
+#                                    p_value=price_t_test$p.value))
+#   }
+# }
+# t_test_summary
 # write.csv(t_test_summary %>% filter(state_index < bordering_state_index),
 #           paste0("Cocaine Network Optimization/price t_test_summary (", period[1], "-", period[length(period)], ").csv"), row.names=F)
-t_test_summary %>% filter(p_value > 0.5)
+# t_test_summary %>% filter(p_value > 0.5)
 
 
 # Optimization
@@ -227,6 +230,8 @@ alpha_t_test <- 0.25
       relaxed_pairs_index <- rbind(relaxed_pairs_index, c(source_index, destination_index))
       next
     }
+    
+    
     if (source_index %in% t_test_summary$state_index & destination_index %in% t_test_summary$bordering_state_index) {
       if (t_test_summary %>%
           filter(state_index==source_index & bordering_state_index == destination_index) %>%
